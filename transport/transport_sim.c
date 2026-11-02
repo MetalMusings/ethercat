@@ -54,6 +54,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "transport_sim.h"
 
@@ -93,6 +94,9 @@ typedef struct {
     unsigned long od_downloads; /**< Number of SDO download requests. */
     uint8_t eoe_frame[1600]; /**< EoE frame reassembly buffer. */
     size_t eoe_len; /**< Bytes assembled so far. */
+    unsigned int sii_lost_scans; /**< Lose the replies to SII accesses during
+                                   the first this many bus scans (see
+                                   sim_bus_lose_sii). */
 } sim_slave_t;
 
 struct sim_bus {
@@ -108,17 +112,36 @@ struct sim_bus {
     unsigned long frame_count;
     unsigned long al_status_brds; /**< BRDs of the AL status register
                                     (see sim_bus_al_status_brd_count). */
+    int irq_cpu;              /**< Last set_cpu_affinity CPU, -1 if never. */
+    unsigned int scans;       /**< Bus scans begun: broadcast writes of the
+                                station address register (0x0010). */
+    int drop_frame;           /**< The frame being processed is lost. */
+    long irq_pin_frames;      /**< frame_count at that call, -1 if never. */
     pthread_mutex_t lock;
 
     struct {
         uint8_t data[EC_TRANSPORT_MAX_FRAME_SIZE];
         size_t len;
+        uint64_t due_ns; /**< CLOCK_MONOTONIC time it may be received. */
     } rxq[SIM_RXQ_LEN];
+    uint64_t reply_delay_ns; /**< See sim_bus_set_reply_delay(). */
     unsigned int rxq_head; /**< Next slot to fill. */
     unsigned int rxq_tail; /**< Next slot to drain. */
 };
 
 /****************************************************************************/
+
+/* TRUSTED: clock_gettime(CLOCK_MONOTONIC) is a nonblocking vDSO call. */
+static uint64_t sim_now_ns(void) ECRT_RT_ATTR;
+ECRT_RT_TRUSTED_BEGIN
+static uint64_t sim_now_ns(void)
+{
+    struct timespec ts;
+
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t) ts.tv_sec * 1000000000ULL + (uint64_t) ts.tv_nsec;
+}
+ECRT_RT_TRUSTED_END
 
 static uint16_t sim_rd16(const uint8_t *p)
 {
@@ -880,6 +903,10 @@ static void sim_bus_process_datagram(sim_bus_t *bus, uint8_t cmd,
                     if (sim_rd16(bus->slaves[i].regs + 0x0010) == station) {
                         wkc = (uint16_t) (wkc + sim_slave_process(
                                 &bus->slaves[i], cmd, offset, data, len));
+                        if (offset >= 0x0500 && offset < 0x0510
+                                && bus->scans <= bus->slaves[i].sii_lost_scans) {
+                            bus->drop_frame = 1;
+                        }
                     }
                 }
             }
@@ -890,6 +917,9 @@ static void sim_bus_process_datagram(sim_bus_t *bus, uint8_t cmd,
                 int16_t pos = (int16_t) sim_rd16(addr);
                 if (cmd == 0x07 && offset == 0x0130) {
                     bus->al_status_brds++;
+                }
+                if (cmd == 0x08 && offset == 0x0010) {
+                    bus->scans++; /* a scan begins: station addresses cleared */
                 }
                 for (i = 0; i < bus->nslaves; i++) {
                     wkc = (uint16_t) (wkc + sim_slave_process(
@@ -1266,8 +1296,10 @@ static int sim_send(ec_transport_t *transport, size_t size)
     }
 
     bus->frame_count++;
+    bus->drop_frame = 0;
 
-    if (sim_bus_process_frame(bus, transport->tx_buffer, size) == 0) {
+    if (sim_bus_process_frame(bus, transport->tx_buffer, size) == 0
+            && !bus->drop_frame) {
         unsigned int s;
         /* Loopback slaves: echo the output process data the master just
          * wrote (SM2) into the input process data (SM3), so it reappears on
@@ -1288,6 +1320,7 @@ static int sim_send(ec_transport_t *transport, size_t size)
         }
         memcpy(bus->rxq[bus->rxq_head].data, transport->tx_buffer, size);
         bus->rxq[bus->rxq_head].len = size;
+        bus->rxq[bus->rxq_head].due_ns = sim_now_ns() + bus->reply_delay_ns;
         bus->rxq_head = next;
     }
 
@@ -1306,7 +1339,9 @@ static int sim_receive(ec_transport_t *transport, uint8_t *buffer,
     size_t len = 0;
 
     pthread_mutex_lock(&bus->lock);
-    if (bus->rxq_tail != bus->rxq_head) {
+    if (bus->rxq_tail != bus->rxq_head
+            && (!bus->reply_delay_ns
+                || sim_now_ns() >= bus->rxq[bus->rxq_tail].due_ns)) {
         len = bus->rxq[bus->rxq_tail].len;
         if (len <= max_size) {
             memcpy(buffer, bus->rxq[bus->rxq_tail].data, len);
@@ -1381,6 +1416,20 @@ static int sim_get_fd(ec_transport_t *transport)
     return -1;
 }
 
+/* No IRQs to move: records the request (and how far the bus traffic had
+ * got by then) for sim_bus_irq_cpu() / sim_bus_irq_pin_frames(), and
+ * reports one IRQ pinned as a NIC with a single vector would. */
+static int sim_set_cpu_affinity(ec_transport_t *transport, int cpu)
+{
+    sim_bus_t *bus = transport->priv;
+
+    pthread_mutex_lock(&bus->lock);
+    bus->irq_cpu = cpu;
+    bus->irq_pin_frames = (long) bus->frame_count;
+    pthread_mutex_unlock(&bus->lock);
+    return 1;
+}
+
 const ec_transport_ops_t ec_transport_sim_ops = {
     .name = "sim",
     .open = sim_open,
@@ -1391,7 +1440,7 @@ const ec_transport_ops_t ec_transport_sim_ops = {
     .get_link_state = sim_get_link_state,
     .get_mac = sim_get_mac,
     .get_fd = sim_get_fd,
-    .set_cpu_affinity = NULL,
+    .set_cpu_affinity = sim_set_cpu_affinity,
 };
 
 /****************************************************************************/
@@ -1415,6 +1464,8 @@ sim_bus_t *sim_bus_create(unsigned int nslaves,
 
     bus->nslaves = nslaves;
     bus->link_up = 1;
+    bus->irq_cpu = -1;
+    bus->irq_pin_frames = -1;
     pthread_mutex_init(&bus->lock, NULL);
 
     for (i = 0; i < nslaves; i++) {
@@ -1521,6 +1572,52 @@ unsigned long sim_bus_frame_count(sim_bus_t *bus)
 
     pthread_mutex_lock(&bus->lock);
     n = bus->frame_count;
+    pthread_mutex_unlock(&bus->lock);
+    return n;
+}
+
+void sim_bus_lose_sii(sim_bus_t *bus, unsigned int pos, unsigned int scans)
+{
+    pthread_mutex_lock(&bus->lock);
+    if (pos < bus->nslaves) {
+        bus->slaves[pos].sii_lost_scans = scans;
+    }
+    pthread_mutex_unlock(&bus->lock);
+}
+
+void sim_bus_set_reply_delay(sim_bus_t *bus, unsigned int us)
+{
+    pthread_mutex_lock(&bus->lock);
+    bus->reply_delay_ns = (uint64_t) us * 1000ULL;
+    pthread_mutex_unlock(&bus->lock);
+}
+
+unsigned int sim_bus_scan_count(sim_bus_t *bus)
+{
+    unsigned int n;
+
+    pthread_mutex_lock(&bus->lock);
+    n = bus->scans;
+    pthread_mutex_unlock(&bus->lock);
+    return n;
+}
+
+int sim_bus_irq_cpu(sim_bus_t *bus)
+{
+    int cpu;
+
+    pthread_mutex_lock(&bus->lock);
+    cpu = bus->irq_cpu;
+    pthread_mutex_unlock(&bus->lock);
+    return cpu;
+}
+
+long sim_bus_irq_pin_frames(sim_bus_t *bus)
+{
+    long n;
+
+    pthread_mutex_lock(&bus->lock);
+    n = bus->irq_pin_frames;
     pthread_mutex_unlock(&bus->lock);
     return n;
 }

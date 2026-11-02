@@ -92,6 +92,29 @@ uint8_t *sim_bus_slave_regs(sim_bus_t *bus, unsigned int pos);
 /** Number of frames processed by the bus so far. */
 unsigned long sim_bus_frame_count(sim_bus_t *bus);
 
+/** Lose every frame that accesses slave \a pos's SII (registers 0x0500 to
+ * 0x050F) during the first \a scans bus scans -- a scan begins with the
+ * broadcast write of the station addresses.  The slave still sees the
+ * access; only the reply never comes back, which is what a reply delivered
+ * after the datagram timeout looks like to the master.  Set it before the
+ * master starts. */
+void sim_bus_lose_sii(sim_bus_t *bus, unsigned int pos, unsigned int scans);
+
+/** Deliver every reply \a us microseconds after its frame was sent (0: at
+ * once), as a NIC whose interrupts are handled on a busy CPU does. */
+void sim_bus_set_reply_delay(sim_bus_t *bus, unsigned int us);
+
+/** Bus scans the master has begun so far (see sim_bus_lose_sii). */
+unsigned int sim_bus_scan_count(sim_bus_t *bus);
+
+/** CPU the master last asked the transport to pin its IRQs to, -1 if it
+ * never did. */
+int sim_bus_irq_cpu(sim_bus_t *bus);
+
+/** Frames the bus had processed when that request came, -1 if it never
+ * came: 0 means the IRQs were pinned before the first frame of the scan. */
+long sim_bus_irq_pin_frames(sim_bus_t *bus);
+
 /** Number of broadcast reads of the AL status register (0x0130) the
  * master has issued so far — the master FSM's bus-state poll.  Lets
  * tests assert that bus-state monitoring keeps running while a long

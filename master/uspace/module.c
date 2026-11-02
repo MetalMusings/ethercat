@@ -31,6 +31,7 @@
 #include "../device.h"
 #include "../master.h"
 
+#include <errno.h>
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
@@ -97,11 +98,49 @@ int ecrt_lib_init(ec_log_cb_t log_cb, const char *socket_path)
 
 /****************************************************************************/
 
+/** Pin the NIC IRQs of the master's transports to \a cpu (-1: leave them).
+ *  Once, at startup: the library does not move them afterwards.  A failure
+ *  is reported and not fatal -- the bus works with the IRQs where they are,
+ *  only its timing is at the mercy of that CPU's other load. */
+static void pin_transport_irqs(ec_master_t *master, int cpu)
+{
+    ec_transport_t *transports[2];
+    unsigned int i;
+    int ret;
+
+    if (cpu < 0) {
+        EC_MASTER_INFO(master, "Transport IRQs not pinned (no CPU given).\n");
+        return;
+    }
+
+    transports[0] = master->pal.transport;
+    transports[1] = master->pal.backup_transport;
+    for (i = 0; i < 2; i++) {
+        if (!transports[i]) {
+            continue;
+        }
+        ret = ec_transport_set_cpu_affinity(transports[i], cpu);
+        if (ret > 0) {
+            EC_MASTER_INFO(master, "Pinned %d transport IRQ(s) of %s to CPU %d.\n",
+                    ret, transports[i]->interface, cpu);
+        } else if (ret == -ENOSYS) {
+            EC_MASTER_WARN(master, "Transport of %s cannot pin its IRQs,"
+                    " leaving them where they are.\n", transports[i]->interface);
+        } else {
+            EC_MASTER_WARN(master, "Failed to pin the transport IRQs of %s"
+                    " to CPU %d: %d\n", transports[i]->interface, cpu, ret);
+        }
+    }
+}
+
+/****************************************************************************/
+
 ec_master_t *ecrt_startup_master(unsigned int index,
         ec_transport_t *transport,
         ec_transport_t *backup_transport,
         unsigned int debug_level,
-        int run_on_cpu)
+        int run_on_cpu,
+        int irq_cpu)
 {
     ec_master_t *master;
     int ret;
@@ -134,8 +173,6 @@ ec_master_t *ecrt_startup_master(unsigned int index,
     /* Borrow transport pointers — caller owns them, library opens/closes */
     master->pal.transport = transport;
     master->pal.backup_transport = backup_transport;
-    atomic_init(&master->pal.rt_cpu, -1);
-    master->pal.affinity_cpu = -1;
 
     /* Open main transport (interface stored in transport->interface) */
     ret = ec_transport_open(master->pal.transport);
@@ -204,6 +241,12 @@ ec_master_t *ecrt_startup_master(unsigned int index,
     }
 #endif
 
+    /* The NIC IRQs go to their CPU before the idle phase starts the bus
+     * scan: on a CPU shared with the rest of the system the scan's replies
+     * can be delivered later than the datagram timeout, and the scan
+     * fails (the slaves' SII is never read). */
+    pin_transport_irqs(master, irq_cpu);
+
     /* Enter idle phase */
     ret = ec_master_enter_idle_phase(master);
     if (ret < 0) {
@@ -216,30 +259,33 @@ ec_master_t *ecrt_startup_master(unsigned int index,
      * ecrt_master_slave_config(), slaves have been scanned and their SII
      * data (including default PDO mappings) is available.
      *
-     * Activity-based scan timeout: reset on every new slave discovered.
-     * This handles both empty buses (timeout after ~5s) and large buses
-     * (keeps waiting as long as slaves are being found). */
+     * Activity-based scan timeout: reset on every scan begun and every
+     * slave scanned.  This handles both empty buses (timeout after ~5s) and
+     * large or rescanned buses (keeps waiting while the scan progresses). */
     {
-        unsigned int prev_count = master->slave_count;
+        /* Progress is any scan begun or slave scanned: a repeated startup
+         * scan (EC_INITIAL_SCAN_ATTEMPTS) finds the same slaves again, so
+         * the slave count alone would read as a stall. */
+        unsigned int prev_progress = master->scan_progress;
         while (!master->initial_scan_done) {
             ec_wq_wait_timeout(master->scan_queue, master->initial_scan_done,
                     EC_SCAN_PROGRESS_TIMEOUT);
             if (master->initial_scan_done)
                 break;
-            if (master->slave_count == prev_count) {
+            if (master->scan_progress == prev_progress) {
                 /* No progress — bus empty or stalled */
                 EC_MASTER_WARN(master,
                         "Initial bus scan timed out after %u seconds"
-                        " with no new slaves. %u slave(s) found so far."
+                        " without progress. %u slave(s) found so far."
                         " Scan continues in background.\n",
                         EC_SCAN_PROGRESS_TIMEOUT, master->slave_count);
                 break;
             }
-            /* Progress was made (new slaves found), keep waiting */
+            /* Progress was made, keep waiting */
             EC_MASTER_DBG(master, 1,
                     "Scan progress: %u slave(s) found so far,"
                     " resetting timeout.\n", master->slave_count);
-            prev_count = master->slave_count;
+            prev_progress = master->scan_progress;
         }
     }
     EC_MASTER_DBG(master, 1, "Initial bus scan complete, %u slave(s) found.\n",

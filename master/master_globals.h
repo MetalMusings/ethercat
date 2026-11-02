@@ -37,6 +37,13 @@
 /** Datagram timeout in microseconds. */
 #define EC_IO_TIMEOUT 500
 
+/** Datagram timeout in microseconds before activation (idle phase: bus
+ * scan, slave configuration).  Nothing there is time-critical, and its
+ * replies may be handled on a CPU shared with the rest of the system -- on
+ * a coating machine they took 0.5-1.8 ms, and the scan failed with
+ * EC_IO_TIMEOUT. */
+#define EC_IDLE_IO_TIMEOUT 2000
+
 /** Time to send a byte in nanoseconds.
  *
  * t_ns = 1 / (100 MBit/s / 8 bit/byte) = 80 ns/byte
@@ -45,6 +52,12 @@
 
 /** Number of state machine retries on datagram timeout. */
 #define EC_FSM_RETRIES 3
+
+/** Bus scans the master makes at startup before it accepts one that left
+ * slaves unscanned: a slave without its SII cannot be configured, and a
+ * reply that arrived too late in one scan usually arrives in time in the
+ * next. */
+#define EC_INITIAL_SCAN_ATTEMPTS 3
 
 /** Seconds to wait before fetching SDO dictionary
     after slave entered PREOP state. */

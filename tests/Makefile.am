@@ -46,10 +46,13 @@ check_PROGRAMS = \
 	test_sim_dict_bg \
 	test_sim_domain \
 	test_sim_eoe \
+	test_sim_irq_pin \
 	test_sim_link \
 	test_sim_multi \
 	test_sim_pdo_assign \
 	test_sim_scan \
+	test_sim_scan_retry \
+	test_sim_scan_slow_replies \
 	test_sim_scan_stale_mbox \
 	test_sim_sdo_info \
 	test_sim_transport_file \
@@ -78,10 +81,13 @@ test_sim_dc_SOURCES = test_sim_dc.c test.h
 test_sim_dict_bg_SOURCES = test_sim_dict_bg.c test.h
 test_sim_domain_SOURCES = test_sim_domain.c test.h
 test_sim_eoe_SOURCES = test_sim_eoe.c test.h
+test_sim_irq_pin_SOURCES = test_sim_irq_pin.c test.h
 test_sim_link_SOURCES = test_sim_link.c test.h
 test_sim_multi_SOURCES = test_sim_multi.c test.h
 test_sim_pdo_assign_SOURCES = test_sim_pdo_assign.c test.h
 test_sim_scan_SOURCES = test_sim_scan.c test.h
+test_sim_scan_retry_SOURCES = test_sim_scan_retry.c test.h
+test_sim_scan_slow_replies_SOURCES = test_sim_scan_slow_replies.c test.h
 test_sim_scan_stale_mbox_SOURCES = test_sim_scan_stale_mbox.c test.h
 test_sim_sdo_info_SOURCES = test_sim_sdo_info.c test.h
 test_sim_transport_file_SOURCES = test_sim_transport_file.c test.h

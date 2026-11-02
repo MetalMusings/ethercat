@@ -56,9 +56,13 @@
 /** SDO injection timeout in microseconds. */
 #define EC_SDO_INJECTION_TIMEOUT 10000
 
-/** Frame timeout
+/** Frame timeout in the operation phase
  */
 static ec_time_t datagram_timeout;
+
+/** Frame timeout in the idle phase (see EC_IDLE_IO_TIMEOUT)
+ */
+static ec_time_t idle_datagram_timeout;
 
 /** Timeout for external datagram injection
  */
@@ -106,6 +110,8 @@ void ec_master_init_static(void)
 {
     // one jiffy may always elapse between time measurement
     datagram_timeout = max(ec_us_to_time(EC_IO_TIMEOUT), (ec_time_t) 1);
+    idle_datagram_timeout =
+        max(ec_us_to_time(EC_IDLE_IO_TIMEOUT), (ec_time_t) 1);
     ext_injection_timeout =
         max(ec_us_to_time(EC_SDO_INJECTION_TIMEOUT), (ec_time_t) 1);
 }
@@ -171,6 +177,8 @@ int ec_master_init(ec_master_t *master, /**< EtherCAT master */
     master->scan_index = 0;
     master->allow_scan = 1;
     master->initial_scan_done = 0;
+    master->scan_progress = 0;
+    master->initial_scan_attempts = 0;
     ec_sem_init(&master->scan_sem, 1);
     ec_wq_init(&master->scan_queue);
 
@@ -1473,7 +1481,6 @@ static int ec_master_operation_thread(void *priv_data)
 
         ec_master_operation_thread_schedule(master);
 
-        ec_pal_check_irq_affinity(master);
         ec_pal_check_link_states(master);
     }
 
@@ -2312,8 +2319,8 @@ int ecrt_master_receive(ec_master_t *master)
 {
     unsigned int dev_idx;
     ec_datagram_t *datagram, *next;
-
-    ec_pal_record_rt_cpu(master);
+    ec_time_t timeout = master->phase == EC_IDLE
+        ? idle_datagram_timeout : datagram_timeout;
 
     // receive datagrams
     for (dev_idx = EC_DEVICE_MAIN; dev_idx < ec_master_num_devices(master);
@@ -2327,7 +2334,7 @@ int ecrt_master_receive(ec_master_t *master)
         if (datagram->state != EC_DATAGRAM_SENT) continue;
 
         if (master->devices[EC_DEVICE_MAIN].time_poll -
-                datagram->time_sent > datagram_timeout) {
+                datagram->time_sent > timeout) {
             list_del_init(&datagram->queue);
             datagram->state = EC_DATAGRAM_TIMED_OUT;
             master->stats.timeouts++;
