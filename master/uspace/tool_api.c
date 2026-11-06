@@ -111,7 +111,11 @@ int ecrt_tool_get_master(ec_master_t *master, ec_tool_master_t *data)
 #else
     data->eoe_handler_count = 0;
 #endif
-    data->phase     = (uint8_t)master->phase;
+    /* There is no ecrt_request_master() here, so the master stays in the
+     * IDLE phase while the application runs it (the idle I/O timeout
+     * depends on that). Report what the kernel master reports with an
+     * application attached: OPERATION once the master is activated. */
+    data->phase     = (uint8_t)(master->active ? EC_OPERATION : master->phase);
     data->active    = (uint8_t)master->active;
     data->scan_busy = master->scan_busy;
 
