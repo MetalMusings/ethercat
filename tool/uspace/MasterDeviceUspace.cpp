@@ -134,6 +134,15 @@ class MasterDeviceUspace : public MasterDeviceBackend
                 stringstream err;
                 err << "Failed to connect to master socket "
                     << socketPath << ": " << strerror(savedErrno);
+                if (savedErrno == ENOENT || savedErrno == ECONNREFUSED) {
+                    err << "." << endl << "No userspace master is running.";
+                    if (access("/dev/EtherCAT0", F_OK) == 0)
+                        err << " The kernel master is loaded: use its"
+                            " ethercat tool.";
+                    else
+                        err << " Start one with:"
+                            " sudo ec_uspace_master start";
+                }
                 throw runtime_error(err.str());
             }
         }
