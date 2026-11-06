@@ -698,6 +698,19 @@ EC_PUBLIC_API unsigned int ecrt_version_magic(void) ECRT_RT_ATTR;
 #define EC_IPC_DEFAULT_SOCKET_PATH "/var/run/ethercat.sock"
 #endif
 
+/** Lock file a userspace master holds while it owns a network interface.
+ *
+ *  printf format; %s is the interface name. The holder keeps an exclusive
+ *  flock() on it for as long as the interface is in use and writes its PID
+ *  into it. ec_uspace_master takes it, and an application that runs its own
+ *  master (for example LinuxCNC) should take it too: a holder that is an
+ *  ec_uspace_master started on demand by the ethercat tool can then be asked to
+ *  exit with SIGTERM, which releases the interface.
+ */
+#ifndef EC_USPACE_LOCK_PATH_FMT
+#define EC_USPACE_LOCK_PATH_FMT "/run/ethercat-uspace.%s.lock"
+#endif
+
 /** Log callback type.
  *
  *  Called by the library to report diagnostic messages. The callback
@@ -739,7 +752,7 @@ typedef void (*ec_log_cb_t)(int level, const char *fmt, va_list ap);
  *                     The socket is created with mode 0660 (owner and group
  *                     only), since the tool API includes write operations.
  *                     To grant a tool group access, chown() the socket file
- *                     after this call returns (the ec_master daemon does
+ *                     after this call returns (the ec_uspace_master daemon does
  *                     this via --socket-group).
  *  \return 0 on success, -EBUSY if already initialized, < 0 on other
  *          errors. */
@@ -801,6 +814,17 @@ EC_PUBLIC_API ec_master_t *ecrt_startup_master(
  *  infrastructure teardown.
  */
 EC_PUBLIC_API void ecrt_lib_cleanup(void);
+
+/** Seconds since the IPC server last served a request.
+ *
+ *  Lets a master started on demand exit when no tool has used it for a
+ *  while (ec_uspace_master --idle-exit).
+ *
+ *  
+eturn Seconds since the last request or the last disconnect, 0 while
+ *          a tool is connected, or -1 if the IPC server is not running.
+ */
+EC_PUBLIC_API int ecrt_lib_ipc_idle_seconds(void);
 
 #else /* !EC_USPACE_MASTER */
 

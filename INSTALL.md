@@ -66,7 +66,7 @@ make
 make install    # as root
 ```
 
-This installs `libethercat.so.2`, the `ec_master` standalone daemon, the
+This installs `libethercat.so.2`, the `ec_uspace_master` standalone daemon, the
 `ethercat` command-line tool, and pkg-config/CMake package files. Note
 that the userspace library's soname (`.so.2`) deliberately differs from
 the kernel-mode client library's (`.so.1`): the two are not ABI
@@ -76,7 +76,7 @@ Run a standalone master (the tool connects over a Unix domain socket,
 created with mode 0660; grant a tool group with `--socket-group`):
 
 ```bash
-# ec_master -i eth0 --socket-group ethercat
+# ec_uspace_master -i eth0 --socket-group ethercat
 $ ethercat slaves
 ```
 

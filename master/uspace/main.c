@@ -42,10 +42,13 @@
 #include <grp.h>
 #include <errno.h>
 #include <string.h>
+#include <sys/file.h>
+
+#include "ctl.h"
 
 /****************************************************************************/
 
-#define EC_PIDFILE      "/var/run/ec_master.pid"
+#define EC_PIDFILE      "/var/run/ec_uspace_master.pid"
 
 /** Per-master configuration block. */
 struct master_config {
@@ -75,6 +78,47 @@ static const char *g_socket_path = EC_IPC_DEFAULT_SOCKET_PATH;
 
 /** Group granted access to the IPC socket (NULL = owner only) */
 static const char *g_socket_group = NULL;
+
+/** Exit after this many seconds without a tool request (0 = never) */
+static unsigned int g_idle_exit = 0;
+
+/** Take the lock that says this process owns the interface.
+ *
+ * See EC_USPACE_LOCK_PATH_FMT. The lock is held (the fd stays open) until
+ * the process exits, after the master has closed the interface.
+ *
+ * 
+eturn 0, or -1 if another process holds it (its PID is in *holder).
+ */
+static int lock_interface(const char *interface, pid_t *holder)
+{
+    char path[128];
+    char buf[32];
+    int fd;
+    ssize_t n;
+
+    *holder = 0;
+    snprintf(path, sizeof(path), EC_USPACE_LOCK_PATH_FMT, interface);
+    fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0644);
+    if (fd < 0) {
+        fprintf(stderr, "Error: cannot open %s: %s\n", path, strerror(errno));
+        return -1;
+    }
+    if (flock(fd, LOCK_EX | LOCK_NB) < 0) {
+        n = pread(fd, buf, sizeof(buf) - 1, 0);
+        if (n > 0) {
+            buf[n] = 0;
+            *holder = (pid_t)strtol(buf, NULL, 10);
+        }
+        close(fd);
+        return -1;
+    }
+    n = snprintf(buf, sizeof(buf), "%d\n", (int)getpid());
+    if (ftruncate(fd, 0) < 0 || pwrite(fd, buf, (size_t)n, 0) != n) {
+        /* The lock still works without the PID; only a handover needs it. */
+    }
+    return 0; /* fd deliberately left open */
+}
 
 /****************************************************************************/
 
@@ -184,6 +228,12 @@ int main(int argc, char *argv[])
     int i;
     int c;
 
+    /* start | stop | status */
+    ret = ec_uspace_ctl(argc, argv);
+    if (ret >= 0)
+        return ret;
+    ret = 0;
+
     /* Current block defaults */
     struct master_config cur = {
         .interface = NULL,
@@ -202,13 +252,14 @@ int main(int argc, char *argv[])
         {"debug",      required_argument, 0, 'd'},
         {"socket",       required_argument, 0, 's'},
         {"socket-group", required_argument, 0, 'g'},
+        {"idle-exit",  required_argument, 0, 'x'},
         {"foreground", no_argument,       0, 'f'},
         {"log-stdout", no_argument,       0, 'l'},
         {"help",       no_argument,       0, 'h'},
         {0, 0, 0, 0}
     };
 
-    while ((c = getopt_long(argc, argv, "i:t:b:c:q:d:s:g:flh",
+    while ((c = getopt_long(argc, argv, "i:t:b:c:q:d:s:g:x:flh",
                     long_options, NULL)) != -1) {
         switch (c) {
             case 'i':
@@ -280,6 +331,9 @@ int main(int argc, char *argv[])
             case 'g':
                 g_socket_group = optarg;
                 break;
+            case 'x':
+                g_idle_exit = (unsigned int)strtoul(optarg, NULL, 0);
+                break;
             case 'f':
                 g_foreground = 1;
                 break;
@@ -316,6 +370,10 @@ int main(int argc, char *argv[])
                 fprintf(stdout,
                         "  -g, --socket-group <grp>  Grant this group access"
                         " to the IPC socket\n");
+                fprintf(stdout,
+                        "  -x, --idle-exit <sec>     Exit when no tool request"
+                        " came for <sec> seconds\n"
+                        "                            (default: 0, never)\n");
                 fprintf(stdout,
                         "  -f, --foreground          Do not daemonize\n");
                 fprintf(stdout,
@@ -376,7 +434,7 @@ int main(int argc, char *argv[])
     /* Set up logging */
     ec_log_cb_t log_cb = g_log_stdout ? log_to_stderr : log_to_syslog;
     if (!g_log_stdout)
-        openlog("ec_master", LOG_PID, LOG_DAEMON);
+        openlog("ec_uspace_master", LOG_PID, LOG_DAEMON);
 
     /* Daemonize unless foreground mode requested */
     if (!g_foreground) {
@@ -387,6 +445,19 @@ int main(int argc, char *argv[])
         if (write_pidfile(EC_PIDFILE) < 0) {
             main_log(EC_LOG_WARNING, "Failed to write PID file %s\n",
                     EC_PIDFILE);
+        }
+    }
+
+    /* One master per interface: refuse if another one (LinuxCNC, another
+     * ec_uspace_master) holds it. Taken after daemonizing so the PID is right. */
+    for (i = 0; i < master_count; i++) {
+        pid_t holder;
+
+        if (lock_interface(configs[i].interface, &holder) < 0) {
+            main_log(EC_LOG_ERR, "%s is in use by another userspace master"
+                    " (pid %d)\n", configs[i].interface, (int)holder);
+            ret = 1;
+            goto out_cleanup_log;
         }
     }
 
@@ -490,7 +561,18 @@ int main(int argc, char *argv[])
             master_count);
 
     while (g_running) {
-        pause();
+        if (g_idle_exit) {
+            int idle = ecrt_lib_ipc_idle_seconds();
+
+            if (idle >= 0 && (unsigned int)idle >= g_idle_exit) {
+                main_log(EC_LOG_INFO, "No tool request for %u s, exiting\n",
+                        g_idle_exit);
+                break;
+            }
+            sleep(1);
+        } else {
+            pause();
+        }
     }
 
     main_log(EC_LOG_INFO, "Shutting down EtherCAT master(s)\n");

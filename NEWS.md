@@ -10,7 +10,7 @@ unmodified upstream branch is kept as `stable-1.6` in this repository.
   no kernel module and no patched network drivers. Kernel mode is retained
   and builds from the same sources through a new platform abstraction layer
   (PAL), see `docs/design/pal.md`.
-  - Standalone `ec_master` daemon for tool-only operation.
+  - Standalone `ec_uspace_master` daemon for tool-only operation.
   - New API: `ecrt_lib_init()`, `ecrt_lib_cleanup()`,
     `ecrt_lib_set_thread_scheduling()`, `ecrt_startup_master()` and the
     transport constructors. `ECRT_VER_MAJOR`/`ECRT_VER_MINOR` stay at 1.6:
@@ -30,7 +30,7 @@ unmodified upstream branch is kept as `stable-1.6` in this repository.
   concurrently, see `docs/design/parallel-slave-config.md`.
 - **`ethercat` tool over IPC**: the tool reaches the userspace master
   through a Unix domain socket (mode 0660, group configurable via
-  `ec_master --socket-group`) instead of a character device.
+  `ec_uspace_master --socket-group`) instead of a character device.
 - **Tests and CI**: `make check` runs a datagram-level bus simulator
   against the real master core (scan, domains, CoE, PDO assignment,
   link loss, DC, multi-slave/PSC, SDO information service, EoE, tool over

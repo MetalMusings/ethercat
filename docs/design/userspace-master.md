@@ -250,11 +250,11 @@ borrows this pointer.
 
 ### Multi-Master CLI Design
 
-The `ec_master` tool supports multiple simultaneous masters via repeated `-i`
+The `ec_uspace_master` tool supports multiple simultaneous masters via repeated `-i`
 flags. Each `-i` starts a new master block and auto-increments the master index.
 
 ```
-ec_master [-d <level>] [-f] [-l]
+ec_uspace_master [-d <level>] [-f] [-l]
           -i <iface> [-t <type>] [-b <iface>] [-c <cpu>]
          [-i <iface> [-t <type>] [-b <iface>] [-c <cpu>]]
          ...
@@ -282,7 +282,7 @@ options (`-t`, `-b`, `-c`) apply to the most recent `-i`. Global options
 **Example:**
 
 ```
-ec_master -d 1 -i eth0 -t raw -b eth1 -c 2 -i eth2 -t xdp
+ec_uspace_master -d 1 -i eth0 -t raw -b eth1 -c 2 -i eth2 -t xdp
 ```
 
 → master 0: main=eth0, transport=raw, backup=eth1, cpu=2, debug=1  
@@ -290,7 +290,7 @@ ec_master -d 1 -i eth0 -t raw -b eth1 -c 2 -i eth2 -t xdp
 
 ### Daemonization
 
-`ec_master` forks to background by default using the standard double-fork +
+`ec_uspace_master` forks to background by default using the standard double-fork +
 setsid pattern:
 
 1. First fork: parent exits, child calls `setsid()` to become session leader
@@ -299,7 +299,7 @@ setsid pattern:
 
 `--foreground` skips all forking and keeps the process in the foreground.
 
-A PID file is written to `/var/run/ec_master.pid` when daemonizing, and
+A PID file is written to `/var/run/ec_uspace_master.pid` when daemonizing, and
 removed on clean shutdown. This is required for init system integration and
 double-start prevention.
 
@@ -315,7 +315,7 @@ to the registered callback, with a stderr fallback if no callback is set.
 
 | Mode | Logging destination |
 |------|---------------------|
-| Daemon (default) | `openlog("ec_master", LOG_PID, LOG_DAEMON)` then `vsyslog()` via `log_to_syslog` callback |
+| Daemon (default) | `openlog("ec_uspace_master", LOG_PID, LOG_DAEMON)` then `vsyslog()` via `log_to_syslog` callback |
 | `--foreground` (without `--log-stdout`) | syslog (same as daemon mode) |
 | `--foreground --log-stdout` | stderr via `log_to_stderr` callback |
 
@@ -340,7 +340,7 @@ When enabled, implies:
 | Target | Source | Install |
 |--------|--------|---------|
 | `libethercat.so` | master core (`master/*.c`) + PAL (`master/uspace/pal*.c`) + transport (`transport/*.c`) + `master/uspace/module.c` + `master/uspace/device_uspace.c` + `master/uspace/cdev.c` + `master/uspace/tool_api.c` | `libdir` |
-| `ec_master` | `master/uspace/main.c` linked against `libethercat.so` | `bindir` |
+| `ec_uspace_master` | `master/uspace/main.c` linked against `libethercat.so` | `bindir` |
 
 ### Autotools Integration
 
@@ -409,12 +409,12 @@ Properties of the implementation that are easy to break by accident.
 
 ### 1. Multiple Master Instances
 
-The `ec_master` standalone tool is designed for multiple simultaneous masters.
+The `ec_uspace_master` standalone tool is designed for multiple simultaneous masters.
 Calling `ecrt_startup_master()` multiple times creates independent master
 instances, each with its own `ec_master_pal_t` fields. This is intentional for
 the library model (unlike the kernel module which has a global master array).
 
-In `ec_master`, multiple masters are configured via repeated `-i` flags (see
+In `ec_uspace_master`, multiple masters are configured via repeated `-i` flags (see
 the Multi-Master CLI Design section). Each `-i` starts a new master block with
 an auto-incremented index. All masters run concurrently and are shut down
 together on SIGINT/SIGTERM.

@@ -50,7 +50,7 @@ tool/ethercat
 device_drivers.md
 generated_table.md
 doxygen-output/
-master/uspace/ec_master
+master/uspace/ec_uspace_master
 master/uspace/libethercat.la
 master/uspace/libethercat.pc
 master/globals.h.gch

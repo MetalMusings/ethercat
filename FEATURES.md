@@ -32,7 +32,7 @@ vim: spelllang=en spell
   — no kernel module, no patched NIC drivers.
   - Kernel mode is fully retained; both modes share the same core through
     a platform abstraction layer (PAL, see docs/design/pal.md).
-  - Standalone `ec_master` daemon for tool-only operation without an
+  - Standalone `ec_uspace_master` daemon for tool-only operation without an
     application.
 - Pluggable userspace transports (`ectp.h`):
   - Raw socket (AF_PACKET) — works with any network interface.
@@ -56,7 +56,7 @@ vim: spelllang=en spell
 - Parallel Slave Configuration (PSC): slaves are configured
   concurrently, reducing bus startup time.
 - `ethercat` command-line tool connects over a Unix domain socket
-  (mode 0660; group configurable via `ec_master --socket-group`).
+  (mode 0660; group configurable via `ec_uspace_master --socket-group`).
 - Hardware-free test suite: a simulated bus (datagram-level slave
   emulation including CoE mailbox, SDO Information Service, DC and
   FMMU/logical addressing) drives the real master core in `make check`;

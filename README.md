@@ -31,7 +31,7 @@ and for merging upstream fixes.
 
 - **Userspace master** (`./configure --enable-uspace-master`). The master
   core runs in the application process as a shared library; a standalone
-  `ec_master` daemon covers tool-only operation without an application.
+  `ec_uspace_master` daemon covers tool-only operation without an application.
 - **Pluggable transports**: raw socket (AF_PACKET, works with any
   interface), AF_XDP (SKB and native, copy mode), Beckhoff CCAT EIM via
   direct PCI BAR access, plus a public ops interface for custom transports.
@@ -82,7 +82,7 @@ sudo make install
 ```
 
 ```bash
-sudo ec_master -i eth0 --socket-group ethercat
+sudo ec_uspace_master -i eth0 --socket-group ethercat
 ethercat slaves
 ```
 

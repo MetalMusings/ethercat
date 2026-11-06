@@ -531,7 +531,7 @@ This ensures only authorized users can issue commands to the master.
 0660 between `bind()` and `listen()` (race-free: connections cannot be
 established before `listen()`), and fails closed if `chmod()` fails.
 Group access is granted by `chown()`ing the socket file after
-`ecrt_lib_init()` returns; the `ec_master` daemon exposes this as
+`ecrt_lib_init()` returns; the `ec_uspace_master` daemon exposes this as
 `-g`/`--socket-group <group>` (resolved via `getgrnam()` before
 daemonizing so a typo fails fast). The chown pins the path with
 `O_PATH|O_NOFOLLOW`, verifies the inode is a socket and operates
@@ -540,14 +540,14 @@ the admin points `--socket` into a world-writable directory) cannot
 redirect it to an arbitrary file. Over-long socket paths are rejected
 (`-ENAMETOOLONG`) instead of silently truncated.
 
-### 2. `ec_master` Daemon Socket Path
+### 2. `ec_uspace_master` Daemon Socket Path
 
-The `ec_master` standalone daemon (`master/uspace/main.c`) passes the socket
+The `ec_uspace_master` standalone daemon (`master/uspace/main.c`) passes the socket
 path through to `ecrt_lib_init()`:
 
 ```
-ec_master -i eth0 -s /var/run/ethercat.sock
-ec_master -i eth0 --socket /var/run/ethercat.sock
+ec_uspace_master -i eth0 -s /var/run/ethercat.sock
+ec_uspace_master -i eth0 --socket /var/run/ethercat.sock
 ```
 
 Default: `EC_IPC_DEFAULT_SOCKET_PATH`. The tool side has the matching

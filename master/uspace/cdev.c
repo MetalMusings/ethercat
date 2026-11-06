@@ -56,6 +56,7 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
+#include <time.h>
 
 #ifndef UNIX_PATH_MAX
 #define UNIX_PATH_MAX (sizeof(((struct sockaddr_un *)0)->sun_path))
@@ -83,9 +84,28 @@ typedef struct {
     char             sock_path[UNIX_PATH_MAX]; /**< Unix socket filesystem path. */
     ec_thread_t     *thread;         /**< Listener thread handle. */
     atomic_int       shutdown;       /**< Non-zero to request shutdown. */
+    atomic_int       clients;        /**< Connected tool clients. */
+    _Atomic long     last_activity;  /**< CLOCK_MONOTONIC seconds of the last request or disconnect. */
 } ec_cdev_t;
 
 static ec_cdev_t g_cdev = { .sock_fd = -1 };
+
+static long ec_ipc_now(void)
+{
+    struct timespec ts;
+
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long)ts.tv_sec;
+}
+
+int ecrt_lib_ipc_idle_seconds(void)
+{
+    if (atomic_load(&g_cdev.sock_fd) < 0)
+        return -1;
+    if (atomic_load(&g_cdev.clients) > 0)
+        return 0;
+    return (int)(ec_ipc_now() - atomic_load(&g_cdev.last_activity));
+}
 
 /****************************************************************************/
 
@@ -1250,6 +1270,7 @@ static int listener_fn(void *arg)
                     fds[nfds].events  = POLLIN;
                     fds[nfds].revents = 0;
                     nfds++;
+                    atomic_store(&cdev->clients, nfds - 1);
                 } else {
                     ec_log(EC_LOG_WARNING,
                             "IPC: too many connections, rejecting\n");
@@ -1273,6 +1294,8 @@ static int listener_fn(void *arg)
             if (fds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) {
                 close(fds[i].fd);
                 fds[i] = fds[--nfds];
+                atomic_store(&cdev->clients, nfds - 1);
+                atomic_store(&cdev->last_activity, ec_ipc_now());
                 fds[i].revents = 0; /* don't re-process moved entry's stale events */
                 continue; /* recheck same index (now holds last entry) */
             }
@@ -1280,9 +1303,11 @@ static int listener_fn(void *arg)
             if (fds[i].revents & POLLIN) {
                 int drop = handle_client_request(fds[i].fd,
                         &payload, &payload_cap);
+                atomic_store(&cdev->last_activity, ec_ipc_now());
                 if (drop) {
                     close(fds[i].fd);
                     fds[i] = fds[--nfds];
+                    atomic_store(&cdev->clients, nfds - 1);
                     fds[i].revents = 0; /* don't re-process moved entry's stale events */
                     continue; /* recheck same index */
                 }
@@ -1338,6 +1363,8 @@ int ec_ipc_server_start(const char *socket_path)
     snprintf(cdev->sock_path, sizeof(cdev->sock_path), "%s", socket_path);
     cdev->thread   = NULL;
     atomic_store(&cdev->shutdown, 0);
+    atomic_store(&cdev->clients, 0);
+    atomic_store(&cdev->last_activity, ec_ipc_now());
 
     /* Create the listening socket. */
     sock_fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
@@ -1367,7 +1394,7 @@ int ec_ipc_server_start(const char *socket_path)
      * Permissions are checked at connect() time and no connection can be
      * established before listen(), so restricting here is race-free.
      * Access for a tool group is granted by chown()ing the socket file
-     * after startup (see ec_master --socket-group). */
+     * after startup (see ec_uspace_master --socket-group). */
     if (chmod(cdev->sock_path, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP) < 0) {
         ret = -errno;
         ec_log(EC_LOG_ERR, "IPC: chmod() of %s failed: %s\n",
