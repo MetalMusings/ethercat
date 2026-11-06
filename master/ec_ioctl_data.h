@@ -46,6 +46,19 @@
  */
 #define EC_IOCTL_VERSION_MAGIC 37
 
+/** Length of the per-device arrays in the structures below.
+ *
+ * The userspace master's IPC server fills the ec_tool_*_t structures of
+ * ecrt_tool.h, whose arrays have EC_TOOL_MAX_NUM_DEVICES entries whatever
+ * --with-devices says. The tool sends and receives these structures, so it
+ * must use the same length; cdev.c checks that the sizes agree. */
+#ifdef EC_USPACE_MASTER
+#include "../include/ecrt_tool.h"
+#define EC_IOCTL_NUM_DEVICES EC_TOOL_MAX_NUM_DEVICES
+#else
+#define EC_IOCTL_NUM_DEVICES EC_MAX_NUM_DEVICES
+#endif
+
 /** String size for ioctl data. */
 #define EC_IOCTL_STRING_SIZE 64
 
@@ -139,7 +152,7 @@ typedef struct {
         int32_t rx_frame_rates[EC_RATE_COUNT];
         int32_t tx_byte_rates[EC_RATE_COUNT];
         int32_t rx_byte_rates[EC_RATE_COUNT];
-    } devices[EC_MAX_NUM_DEVICES];
+    } devices[EC_IOCTL_NUM_DEVICES];
     uint32_t num_devices;
     uint64_t tx_count;
     uint64_t rx_count;
@@ -258,7 +271,7 @@ typedef struct {
     // outputs
     uint32_t data_size;
     uint32_t logical_base_address;
-    uint16_t working_counter[EC_MAX_NUM_DEVICES];
+    uint16_t working_counter[EC_IOCTL_NUM_DEVICES];
     uint16_t expected_working_counter;
     uint32_t fmmu_count;
 } ec_ioctl_domain_t;

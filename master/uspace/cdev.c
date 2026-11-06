@@ -286,6 +286,63 @@ static int send_response_with_trailing(int fd, int32_t ret_val,
 
 #include "../../include/ecrt_tool.h"
 
+/* The tool sends ec_ioctl_*_t (ec_ioctl_data.h) and the dispatchers below
+ * read them as ec_tool_*_t (ecrt_tool.h). The two sets must agree. */
+_Static_assert(sizeof(ec_ioctl_module_t) == sizeof(ec_tool_module_t),
+        "ec_ioctl_module_t and ec_tool_module_t differ");
+_Static_assert(sizeof(ec_ioctl_master_t) == sizeof(ec_tool_master_t),
+        "ec_ioctl_master_t and ec_tool_master_t differ");
+_Static_assert(sizeof(ec_ioctl_slave_t) == sizeof(ec_tool_slave_t),
+        "ec_ioctl_slave_t and ec_tool_slave_t differ");
+_Static_assert(sizeof(ec_ioctl_slave_sync_t) == sizeof(ec_tool_slave_sync_t),
+        "ec_ioctl_slave_sync_t and ec_tool_slave_sync_t differ");
+_Static_assert(sizeof(ec_ioctl_slave_sync_pdo_t) == sizeof(ec_tool_slave_sync_pdo_t),
+        "ec_ioctl_slave_sync_pdo_t and ec_tool_slave_sync_pdo_t differ");
+_Static_assert(sizeof(ec_ioctl_slave_sync_pdo_entry_t) == sizeof(ec_tool_slave_sync_pdo_entry_t),
+        "ec_ioctl_slave_sync_pdo_entry_t and ec_tool_slave_sync_pdo_entry_t differ");
+_Static_assert(sizeof(ec_ioctl_domain_t) == sizeof(ec_tool_domain_t),
+        "ec_ioctl_domain_t and ec_tool_domain_t differ");
+_Static_assert(sizeof(ec_ioctl_domain_fmmu_t) == sizeof(ec_tool_domain_fmmu_t),
+        "ec_ioctl_domain_fmmu_t and ec_tool_domain_fmmu_t differ");
+_Static_assert(sizeof(ec_ioctl_domain_data_t) == sizeof(ec_tool_domain_data_t),
+        "ec_ioctl_domain_data_t and ec_tool_domain_data_t differ");
+_Static_assert(sizeof(ec_ioctl_slave_state_t) == sizeof(ec_tool_slave_state_t),
+        "ec_ioctl_slave_state_t and ec_tool_slave_state_t differ");
+_Static_assert(sizeof(ec_ioctl_slave_sdo_t) == sizeof(ec_tool_slave_sdo_t),
+        "ec_ioctl_slave_sdo_t and ec_tool_slave_sdo_t differ");
+_Static_assert(sizeof(ec_ioctl_slave_sdo_entry_t) == sizeof(ec_tool_slave_sdo_entry_t),
+        "ec_ioctl_slave_sdo_entry_t and ec_tool_slave_sdo_entry_t differ");
+_Static_assert(sizeof(ec_ioctl_slave_sdo_upload_t) == sizeof(ec_tool_slave_sdo_upload_t),
+        "ec_ioctl_slave_sdo_upload_t and ec_tool_slave_sdo_upload_t differ");
+_Static_assert(sizeof(ec_ioctl_slave_sdo_download_t) == sizeof(ec_tool_slave_sdo_download_t),
+        "ec_ioctl_slave_sdo_download_t and ec_tool_slave_sdo_download_t differ");
+_Static_assert(sizeof(ec_ioctl_slave_sii_t) == sizeof(ec_tool_slave_sii_t),
+        "ec_ioctl_slave_sii_t and ec_tool_slave_sii_t differ");
+_Static_assert(sizeof(ec_ioctl_slave_reg_t) == sizeof(ec_tool_slave_reg_t),
+        "ec_ioctl_slave_reg_t and ec_tool_slave_reg_t differ");
+_Static_assert(sizeof(ec_ioctl_slave_foe_t) == sizeof(ec_tool_slave_foe_t),
+        "ec_ioctl_slave_foe_t and ec_tool_slave_foe_t differ");
+_Static_assert(sizeof(ec_ioctl_slave_soe_read_t) == sizeof(ec_tool_slave_soe_read_t),
+        "ec_ioctl_slave_soe_read_t and ec_tool_slave_soe_read_t differ");
+_Static_assert(sizeof(ec_ioctl_slave_soe_write_t) == sizeof(ec_tool_slave_soe_write_t),
+        "ec_ioctl_slave_soe_write_t and ec_tool_slave_soe_write_t differ");
+_Static_assert(sizeof(ec_ioctl_config_t) == sizeof(ec_tool_config_t),
+        "ec_ioctl_config_t and ec_tool_config_t differ");
+_Static_assert(sizeof(ec_ioctl_config_pdo_t) == sizeof(ec_tool_config_pdo_t),
+        "ec_ioctl_config_pdo_t and ec_tool_config_pdo_t differ");
+_Static_assert(sizeof(ec_ioctl_config_pdo_entry_t) == sizeof(ec_tool_config_pdo_entry_t),
+        "ec_ioctl_config_pdo_entry_t and ec_tool_config_pdo_entry_t differ");
+_Static_assert(sizeof(ec_ioctl_config_sdo_t) == sizeof(ec_tool_config_sdo_t),
+        "ec_ioctl_config_sdo_t and ec_tool_config_sdo_t differ");
+_Static_assert(sizeof(ec_ioctl_config_idn_t) == sizeof(ec_tool_config_idn_t),
+        "ec_ioctl_config_idn_t and ec_tool_config_idn_t differ");
+_Static_assert(sizeof(ec_ioctl_config_flag_t) == sizeof(ec_tool_config_flag_t),
+        "ec_ioctl_config_flag_t and ec_tool_config_flag_t differ");
+_Static_assert(sizeof(ec_ioctl_eoe_handler_t) == sizeof(ec_tool_eoe_handler_t),
+        "ec_ioctl_eoe_handler_t and ec_tool_eoe_handler_t differ");
+_Static_assert(sizeof(ec_ioctl_eoe_ip_t) == sizeof(ec_tool_eoe_ip_t),
+        "ec_ioctl_eoe_ip_t and ec_tool_eoe_ip_t differ");
+
 /** EC_CMD_MODULE — return version magic and master count. */
 static int dispatch_module(int fd, ec_master_t *master,
         const uint8_t *req, uint32_t req_size)
