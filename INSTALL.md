@@ -80,6 +80,30 @@ created with mode 0660; grant a tool group with `--socket-group`):
 $ ethercat slaves
 ```
 
+Or let `ec_uspace_master` start and stop itself, the way `ethercatctl`
+does for the kernel master. The settings come from
+`$(sysconfdir)/ethercat-uspace.conf` (`INTERFACE`, `TRANSPORT`,
+`IDLE_EXIT`, `GROUP`, `CPU`, `IRQ_CPU`; `-i`, `-t` and `-x` override
+them):
+
+```bash
+# cat /usr/local/etc/ethercat-uspace.conf
+INTERFACE=eth0
+TRANSPORT=raw
+IDLE_EXIT=0          # seconds without a tool request before it exits; 0 = never
+# ec_uspace_master start     # returns once the slaves reached PREOP
+$ ethercat slaves            # the socket belongs to the group of the sudo user, or GROUP
+$ ec_uspace_master status    # who holds the interface
+# ec_uspace_master stop      # waits until the interface is free
+```
+
+While it uses an interface, the daemon holds an `flock()` on
+`/run/ethercat-uspace.<interface>.lock` with its PID in it
+(`EC_USPACE_LOCK_PATH_FMT` in `ecrt.h`). An application that runs its
+own master on the same interface should take the same lock: it can then
+send a running `ec_uspace_master` SIGTERM and wait for the lock, which
+is released once the interface is closed.
+
 Applications embedding the library should read the realtime notes at
 `ecrt_lib_init()` in `ecrt.h` (memory locking and `RLIMIT_MEMLOCK`,
 nonblocking log callback, thread scheduling) and

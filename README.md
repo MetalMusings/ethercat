@@ -86,6 +86,14 @@ sudo ec_uspace_master -i eth0 --socket-group ethercat
 ethercat slaves
 ```
 
+or, with the settings in `ethercat-uspace.conf` (see INSTALL.md):
+
+```bash
+sudo ec_uspace_master start
+ethercat slaves
+sudo ec_uspace_master stop
+```
+
 Kernel master:
 
 ```bash
