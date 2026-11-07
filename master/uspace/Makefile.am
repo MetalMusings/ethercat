@@ -165,18 +165,17 @@ noinst_HEADERS = \
 
 EXTRA_DIST = libethercat.map
 
-bin_PROGRAMS = ec_uspace_master
+bin_PROGRAMS = ec_master
 
-ec_uspace_master_SOURCES = main.c ctl.c ctl.h
+ec_master_SOURCES = main.c
 
-ec_uspace_master_CFLAGS = \
+ec_master_CFLAGS = \
 	-DEC_USPACE_MASTER \
-	-DEC_USPACE_MASTER_CONF=\"$(sysconfdir)/ethercat-uspace.conf\" \
 	-D_GNU_SOURCE \
 	-I$(srcdir) \
 	-I$(top_srcdir) \
 	-I$(top_srcdir)/include
 
-ec_uspace_master_LDADD = libethercat.la
+ec_master_LDADD = libethercat.la
 
 #-----------------------------------------------------------------------------

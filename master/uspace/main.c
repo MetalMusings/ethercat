@@ -44,11 +44,9 @@
 #include <string.h>
 #include <sys/file.h>
 
-#include "ctl.h"
-
 /****************************************************************************/
 
-#define EC_PIDFILE      "/var/run/ec_uspace_master.pid"
+#define EC_PIDFILE      "/var/run/ec_master.pid"
 
 /** Per-master configuration block. */
 struct master_config {
@@ -79,16 +77,12 @@ static const char *g_socket_path = EC_IPC_DEFAULT_SOCKET_PATH;
 /** Group granted access to the IPC socket (NULL = owner only) */
 static const char *g_socket_group = NULL;
 
-/** Exit after this many seconds without a tool request (0 = never) */
-static unsigned int g_idle_exit = 0;
-
 /** Take the lock that says this process owns the interface.
  *
  * See EC_USPACE_LOCK_PATH_FMT. The lock is held (the fd stays open) until
  * the process exits, after the master has closed the interface.
  *
- * 
-eturn 0, or -1 if another process holds it (its PID is in *holder).
+ * \return 0, or -1 if another process holds it (its PID is in *holder).
  */
 static int lock_interface(const char *interface, pid_t *holder)
 {
@@ -228,12 +222,6 @@ int main(int argc, char *argv[])
     int i;
     int c;
 
-    /* start | stop | status */
-    ret = ec_uspace_ctl(argc, argv);
-    if (ret >= 0)
-        return ret;
-    ret = 0;
-
     /* Current block defaults */
     struct master_config cur = {
         .interface = NULL,
@@ -252,14 +240,13 @@ int main(int argc, char *argv[])
         {"debug",      required_argument, 0, 'd'},
         {"socket",       required_argument, 0, 's'},
         {"socket-group", required_argument, 0, 'g'},
-        {"idle-exit",  required_argument, 0, 'x'},
         {"foreground", no_argument,       0, 'f'},
         {"log-stdout", no_argument,       0, 'l'},
         {"help",       no_argument,       0, 'h'},
         {0, 0, 0, 0}
     };
 
-    while ((c = getopt_long(argc, argv, "i:t:b:c:q:d:s:g:x:flh",
+    while ((c = getopt_long(argc, argv, "i:t:b:c:q:d:s:g:flh",
                     long_options, NULL)) != -1) {
         switch (c) {
             case 'i':
@@ -331,9 +318,6 @@ int main(int argc, char *argv[])
             case 'g':
                 g_socket_group = optarg;
                 break;
-            case 'x':
-                g_idle_exit = (unsigned int)strtoul(optarg, NULL, 0);
-                break;
             case 'f':
                 g_foreground = 1;
                 break;
@@ -370,10 +354,6 @@ int main(int argc, char *argv[])
                 fprintf(stdout,
                         "  -g, --socket-group <grp>  Grant this group access"
                         " to the IPC socket\n");
-                fprintf(stdout,
-                        "  -x, --idle-exit <sec>     Exit when no tool request"
-                        " came for <sec> seconds\n"
-                        "                            (default: 0, never)\n");
                 fprintf(stdout,
                         "  -f, --foreground          Do not daemonize\n");
                 fprintf(stdout,
@@ -434,7 +414,7 @@ int main(int argc, char *argv[])
     /* Set up logging */
     ec_log_cb_t log_cb = g_log_stdout ? log_to_stderr : log_to_syslog;
     if (!g_log_stdout)
-        openlog("ec_uspace_master", LOG_PID, LOG_DAEMON);
+        openlog("ec_master", LOG_PID, LOG_DAEMON);
 
     /* Daemonize unless foreground mode requested */
     if (!g_foreground) {
@@ -449,7 +429,7 @@ int main(int argc, char *argv[])
     }
 
     /* One master per interface: refuse if another one (LinuxCNC, another
-     * ec_uspace_master) holds it. Taken after daemonizing so the PID is right. */
+     * ec_master) holds it. Taken after daemonizing so the PID is right. */
     for (i = 0; i < master_count; i++) {
         pid_t holder;
 
@@ -561,18 +541,7 @@ int main(int argc, char *argv[])
             master_count);
 
     while (g_running) {
-        if (g_idle_exit) {
-            int idle = ecrt_lib_ipc_idle_seconds();
-
-            if (idle >= 0 && (unsigned int)idle >= g_idle_exit) {
-                main_log(EC_LOG_INFO, "No tool request for %u s, exiting\n",
-                        g_idle_exit);
-                break;
-            }
-            sleep(1);
-        } else {
-            pause();
-        }
+        pause();
     }
 
     main_log(EC_LOG_INFO, "Shutting down EtherCAT master(s)\n");
