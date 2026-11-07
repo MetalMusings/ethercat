@@ -38,6 +38,8 @@
 #include <stdexcept>
 using namespace std;
 
+extern string binaryBaseName;
+
 #include "../MasterDeviceBackend.h"
 #include "ec_ioctl_data.h"
 
@@ -140,8 +142,8 @@ class MasterDeviceUspace : public MasterDeviceBackend
                         err << " The kernel master is loaded: use its"
                             " ethercat tool.";
                     else
-                        err << " Start one with:"
-                            " sudo ec_uspace_master start";
+                        err << " Start one with: sudo " << binaryBaseName
+                            << " start";
                 }
                 throw runtime_error(err.str());
             }

@@ -60,6 +60,10 @@ using namespace std;
 #include "CommandUpload.h"
 #include "CommandVersion.h"
 #include "CommandXml.h"
+#ifdef EC_USPACE_MASTER
+# include "uspace/CommandStart.h"
+# include "uspace/CommandStop.h"
+#endif
 
 #include "MasterDevice.h"
 
@@ -323,7 +327,13 @@ int main(int argc, char **argv)
     commandList.push_back(new CommandSlaves());
     commandList.push_back(new CommandSoeRead());
     commandList.push_back(new CommandSoeWrite());
+#ifdef EC_USPACE_MASTER
+    commandList.push_back(new CommandStart());
+#endif
     commandList.push_back(new CommandStates());
+#ifdef EC_USPACE_MASTER
+    commandList.push_back(new CommandStop());
+#endif
     commandList.push_back(new CommandUpload());
     commandList.push_back(new CommandVersion());
     commandList.push_back(new CommandXml());

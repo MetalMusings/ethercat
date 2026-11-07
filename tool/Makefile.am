@@ -121,17 +121,31 @@ REV = `if test -s $(top_srcdir)/revision; then \
 		git -C $(top_srcdir) describe 2>/dev/null || echo "unknown"; \
 	fi`
 
+USPACE_TOOL_SRCS = \
+	uspace/CommandStart.cpp \
+	uspace/CommandStop.cpp \
+	uspace/Daemon.cpp
+
+USPACE_TOOL_HDRS = \
+	uspace/CommandStart.h \
+	uspace/CommandStop.h \
+	uspace/Daemon.h
+
 if ENABLE_USPACE_MASTER
-ethercat_SOURCES += uspace/MasterDeviceUspace.cpp
+ethercat_SOURCES += uspace/MasterDeviceUspace.cpp $(USPACE_TOOL_SRCS)
+noinst_HEADERS += $(USPACE_TOOL_HDRS)
 EXTRA_DIST += kernel/MasterDeviceKernel.cpp
 ethercat_CXXFLAGS = \
+	-DEC_MASTER_DAEMON=\"$(bindir)/ec_master\" \
+	-DEC_USPACE_MASTER_CONF=\"$(sysconfdir)/ethercat-uspace.conf\" \
 	-I$(top_srcdir)/include \
 	-I$(top_srcdir)/master \
 	-Wall -DREV=$(REV) \
 	-fno-strict-aliasing
 else
 ethercat_SOURCES += kernel/MasterDeviceKernel.cpp
-EXTRA_DIST += uspace/MasterDeviceUspace.cpp
+EXTRA_DIST += uspace/MasterDeviceUspace.cpp $(USPACE_TOOL_SRCS) \
+	$(USPACE_TOOL_HDRS)
 ethercat_CXXFLAGS = \
 	-I$(top_srcdir)/include \
 	-I$(top_srcdir)/master \

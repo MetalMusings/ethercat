@@ -357,6 +357,39 @@ void MasterDevice::getMaster(ec_ioctl_master_t *data) {
                          Default: /var/run/ethercat.sock
 ```
 
+## Starting and Stopping the Daemon: `ethercat start` / `ethercat stop`
+
+The uspace build has two commands that the kernel build does not
+(`tool/uspace/CommandStart.cpp`, `CommandStop.cpp`, helpers in
+`tool/uspace/Daemon.cpp`). They play the part of `ethercatctl` for the
+free-running `ec_master` daemon, and never touch a master that runs
+inside an application.
+
+- `sudo ethercat start` runs `$(bindir)/ec_master` with the settings
+  from `$(sysconfdir)/ethercat-uspace.conf` (`INTERFACE`, `TRANSPORT`,
+  `CPU`, `IRQ_CPU`, `GROUP`), or with the arguments after `--`
+  (`ethercat start -- -i eth0 -t xdp-native`). The socket group is
+  `GROUP`, else the group of the user that ran `sudo` (`SUDO_GID`), so
+  that the other commands work without `sudo`. It returns once the
+  socket answers and the slaves reached PREOP (an empty bus counts as
+  done after 3 s). It does nothing if an `ec_master` already holds the
+  interface, and fails if anything else holds it or `/dev/EtherCAT0`
+  exists (kernel master loaded).
+- `sudo ethercat stop` sends SIGTERM to every `ec_master` that holds an
+  interface lock and waits until the lock is released. Other holders are
+  left alone. No running daemon is not an error.
+
+Who holds an interface is told by the lock file
+`EC_USPACE_LOCK_PATH_FMT` (`/run/ethercat-uspace.<interface>.lock`,
+`ecrt.h`): the holder keeps an exclusive `flock()` on it while the
+interface is in use and writes its PID into it. `ec_master` takes it
+after daemonizing; an application with its own master should take it
+too, and may send a running `ec_master` SIGTERM to take the interface
+over. The holder's program is read from `/proc/PID/cmdline`.
+
+With `start` and `stop` next to `states`, the abbreviations `st` and
+`sta` are ambiguous in the uspace build; `states` needs at least `stat`.
+
 ## Server Side (in `libethercat.so`)
 
 ### IPC Listener Thread
@@ -469,6 +502,7 @@ in both modes.
 | `tool/MasterDeviceBackend.h` | Abstract backend interface |
 | `tool/kernel/MasterDeviceKernel.cpp` | ioctl backend + factory function |
 | `tool/uspace/MasterDeviceUspace.cpp` | Unix socket backend + factory function |
+| `tool/uspace/CommandStart.cpp`, `CommandStop.cpp`, `Daemon.cpp` | `ethercat start` / `stop` for the `ec_master` daemon |
 | `master/uspace/cdev.c` | IPC listener thread + request dispatch + master registry |
 | `master/uspace/cdev.h` | IPC server interface (`ec_ipc_server_start()`, `ec_ipc_server_stop()`) |
 
@@ -531,7 +565,7 @@ This ensures only authorized users can issue commands to the master.
 0660 between `bind()` and `listen()` (race-free: connections cannot be
 established before `listen()`), and fails closed if `chmod()` fails.
 Group access is granted by `chown()`ing the socket file after
-`ecrt_lib_init()` returns; the `ec_uspace_master` daemon exposes this as
+`ecrt_lib_init()` returns; the `ec_master` daemon exposes this as
 `-g`/`--socket-group <group>` (resolved via `getgrnam()` before
 daemonizing so a typo fails fast). The chown pins the path with
 `O_PATH|O_NOFOLLOW`, verifies the inode is a socket and operates
@@ -540,14 +574,14 @@ the admin points `--socket` into a world-writable directory) cannot
 redirect it to an arbitrary file. Over-long socket paths are rejected
 (`-ENAMETOOLONG`) instead of silently truncated.
 
-### 2. `ec_uspace_master` Daemon Socket Path
+### 2. `ec_master` Daemon Socket Path
 
-The `ec_uspace_master` standalone daemon (`master/uspace/main.c`) passes the socket
+The `ec_master` standalone daemon (`master/uspace/main.c`) passes the socket
 path through to `ecrt_lib_init()`:
 
 ```
-ec_uspace_master -i eth0 -s /var/run/ethercat.sock
-ec_uspace_master -i eth0 --socket /var/run/ethercat.sock
+ec_master -i eth0 -s /var/run/ethercat.sock
+ec_master -i eth0 --socket /var/run/ethercat.sock
 ```
 
 Default: `EC_IPC_DEFAULT_SOCKET_PATH`. The tool side has the matching
