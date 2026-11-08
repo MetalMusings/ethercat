@@ -49,6 +49,7 @@ void ec_fsm_pdo_read_state_pdo_entries(ec_fsm_pdo_t *, ec_datagram_t *);
 
 void ec_fsm_pdo_read_action_next_sync(ec_fsm_pdo_t *, ec_datagram_t *);
 void ec_fsm_pdo_read_action_next_pdo(ec_fsm_pdo_t *, ec_datagram_t *);
+void ec_fsm_pdo_read_action_assignment_unknown(ec_fsm_pdo_t *, ec_datagram_t *);
 
 void ec_fsm_pdo_conf_state_start(ec_fsm_pdo_t *, ec_datagram_t *);
 void ec_fsm_pdo_conf_state_read_mapping(ec_fsm_pdo_t *, ec_datagram_t *);
@@ -320,7 +321,7 @@ void ec_fsm_pdo_read_state_pdo(
         EC_SLAVE_ERR(fsm->slave, "Failed to read index of"
                 " assigned PDO %u from SM%u.\n",
                 fsm->pdo_pos, fsm->sync_index);
-        ec_fsm_pdo_read_action_next_sync(fsm, datagram);
+        ec_fsm_pdo_read_action_assignment_unknown(fsm, datagram);
         return;
     }
 
@@ -328,14 +329,14 @@ void ec_fsm_pdo_read_state_pdo(
         EC_SLAVE_ERR(fsm->slave, "Invalid data size %zu returned"
                 " when uploading SDO 0x%04X:%02X.\n", fsm->request.data_size,
                 fsm->request.index, fsm->request.subindex);
-        ec_fsm_pdo_read_action_next_sync(fsm, datagram);
+        ec_fsm_pdo_read_action_assignment_unknown(fsm, datagram);
         return;
     }
 
     if (!(fsm->pdo = (ec_pdo_t *)
                 ec_alloc(sizeof(ec_pdo_t)))) {
         EC_SLAVE_ERR(fsm->slave, "Failed to allocate PDO.\n");
-        ec_fsm_pdo_read_action_next_sync(fsm, datagram);
+        ec_fsm_pdo_read_action_assignment_unknown(fsm, datagram);
         return;
     }
 
@@ -368,13 +369,32 @@ void ec_fsm_pdo_read_state_pdo_entries(
     if (!ec_fsm_pdo_entry_success(&fsm->fsm_pdo_entry)) {
         EC_SLAVE_ERR(fsm->slave, "Failed to read mapped PDO entries"
                 " for PDO 0x%04X.\n", fsm->pdo->index);
-        ec_fsm_pdo_read_action_next_sync(fsm, datagram);
+        ec_fsm_pdo_read_action_assignment_unknown(fsm, datagram);
         return;
     }
 
     // next PDO
     fsm->pdo_pos++;
     ec_fsm_pdo_read_action_next_pdo(fsm, datagram);
+}
+
+/** The PDO assignment of the current sync manager could be counted but not
+ * read (some drives report an assignment with PDO 0x0000 in it).
+ *
+ * Forget the assignment instead of keeping the SII's default as the slave's:
+ * otherwise a configuration equal to that default looks already done, is not
+ * written, and the slave refuses SAFEOP with its own, different assignment.
+ */
+void ec_fsm_pdo_read_action_assignment_unknown(
+        ec_fsm_pdo_t *fsm, /**< Finite state machine. */
+        ec_datagram_t *datagram /**< Datagram to use. */
+        )
+{
+    EC_SLAVE_WARN(fsm->slave, "PDO assignment of SM%u unknown;"
+            " a configuration will be written in full.\n", fsm->sync_index);
+    ec_pdo_list_clear_pdos(&fsm->sync->pdos);
+    ec_pdo_list_clear_pdos(&fsm->pdos);
+    ec_fsm_pdo_read_action_next_sync(fsm, datagram);
 }
 
 /*****************************************************************************
