@@ -250,6 +250,7 @@ int ecrt_tool_get_slave(ec_master_t *master, ec_tool_slave_t *data)
     data->transmission_delay = slave->transmission_delay;
     data->al_state           = slave->current_state;
     data->error_flag         = slave->error_flag;
+    data->al_status_code     = slave->al_status_code;
     data->sync_count         = slave->sii.sync_count;
     data->sdo_count          = ec_slave_sdo_count(slave);
     data->sii_nwords         = slave->sii_nwords;

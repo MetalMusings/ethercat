@@ -467,6 +467,8 @@ void ec_fsm_change_state_code(ec_fsm_change_t *fsm
                 " datagram failed: %s\n", _wc);
     } else {
         code = EC_READ_U16(datagram->data);
+        // Kept for the tool: acknowledging the error below clears it in the slave.
+        fsm->slave->al_status_code = code;
         for (al_msg = al_status_messages; al_msg->code != 0xffff; al_msg++) {
             if (al_msg->code != code) {
                 continue;

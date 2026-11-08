@@ -107,6 +107,11 @@ void MasterDevice::getModule(ec_ioctl_module_t *data)
         errno = -ret;
         stringstream err;
         err << "Failed to get module information: " << strerror(errno);
+        if (errno == EINVAL) {
+            // The userspace master refuses a client of another version.
+            err << " (is the running master a different version"
+                " than this tool?)";
+        }
         throw MasterDeviceException(err);
     }
 }

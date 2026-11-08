@@ -44,7 +44,7 @@
  *
  * Increment this when changing the ioctl interface!
  */
-#define EC_IOCTL_VERSION_MAGIC 37
+#define EC_IOCTL_VERSION_MAGIC 38
 
 /** Length of the per-device arrays in the structures below.
  *
@@ -208,6 +208,7 @@ typedef struct {
     uint32_t transmission_delay;
     uint8_t al_state;
     uint8_t error_flag;
+    uint16_t al_status_code;
     uint8_t sync_count;
     uint16_t sdo_count;
     uint32_t sii_nwords;

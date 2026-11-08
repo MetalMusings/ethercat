@@ -245,7 +245,11 @@ void CommandSlaves::showSlaves(
         cout
             << "Device: " << (si->device_index ? "Backup" : "Main") << endl
             << "State: " << alStateString(si->al_state) << endl
-            << "Flag: " << (si->error_flag ? 'E' : '+') << endl
+            << "Flag: " << (si->error_flag ? 'E' : '+') << endl;
+        if (si->al_status_code)
+            cout << "Last AL status code: 0x" << hex << setfill('0')
+                << setw(4) << si->al_status_code << dec << endl;
+        cout
             << "Identity:" << endl
             << "  Vendor Id:       0x"
             << hex << setfill('0')
