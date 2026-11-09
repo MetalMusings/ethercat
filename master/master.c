@@ -171,6 +171,7 @@ int ec_master_init(ec_master_t *master, /**< EtherCAT master */
     INIT_LIST_HEAD(&master->domains);
 
     master->app_time = 0ULL;
+    master->app_time_stamp = 0;
     master->dc_ref_time = 0ULL;
 
     master->scan_busy = 0;
@@ -2245,6 +2246,7 @@ int ecrt_master_deactivate(ec_master_t *master)
 #endif
 
     master->app_time = 0ULL;
+    master->app_time_stamp = 0;
     master->dc_ref_time = 0ULL;
 
 #ifdef EC_EOE
@@ -2615,6 +2617,7 @@ int ecrt_master_link_state(const ec_master_t *master, unsigned int dev_idx,
 int ecrt_master_application_time(ec_master_t *master, uint64_t app_time)
 {
     master->app_time = app_time;
+    master->app_time_stamp = ec_current_time();
 
     if (unlikely(!master->dc_ref_time)) {
         master->dc_ref_time = app_time;

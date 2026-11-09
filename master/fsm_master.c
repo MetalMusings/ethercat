@@ -39,8 +39,15 @@
 /****************************************************************************/
 
 /** Time difference [ns] to tolerate without setting a new system time offset.
+ *
+ * The offsets are checked when an application activates the master, before
+ * SYNC0 starts. A slave left this far off has to be pulled in by its drift
+ * compensation, which changes the clock's rate by only some 100 us/s, and
+ * the DC sync check (EC_DC_MAX_SYNC_DIFF_NS) gives it EC_DC_SYNC_WAIT_MS
+ * before SYNC0 starts anyway. IgH's 1 ms often left slaves out of sync after
+ * that time; 50 us is a few times the error of reading a slave's time.
  */
-#define EC_SYSTEM_TIME_TOLERANCE_NS 1000000
+#define EC_SYSTEM_TIME_TOLERANCE_NS 50000
 
 /****************************************************************************/
 
@@ -50,8 +57,8 @@ int ec_fsm_master_action_process_sii(ec_fsm_master_t *);
 int ec_fsm_master_action_process_int_request(ec_fsm_master_t *);
 void ec_fsm_master_action_idle(ec_fsm_master_t *);
 void ec_fsm_master_action_next_slave_state(ec_fsm_master_t *);
-uint64_t ec_fsm_master_dc_offset32(ec_fsm_master_t *, uint64_t, uint64_t, unsigned long);
-uint64_t ec_fsm_master_dc_offset64(ec_fsm_master_t *, uint64_t, uint64_t, unsigned long);
+uint64_t ec_fsm_master_dc_offset32(ec_fsm_master_t *, uint64_t, uint64_t, unsigned long, uint64_t);
+uint64_t ec_fsm_master_dc_offset64(ec_fsm_master_t *, uint64_t, uint64_t, unsigned long, uint64_t);
 
 /****************************************************************************/
 
@@ -1362,7 +1369,9 @@ uint64_t ec_fsm_master_dc_offset32(
         ec_fsm_master_t *fsm, /**< Master state machine. */
         uint64_t system_time, /**< System time register. */
         uint64_t old_offset, /**< Time offset register. */
-        ec_time_t time_since_read /**< Time for correction. */
+        ec_time_t time_since_read, /**< Time for correction. */
+        uint64_t app_time /**< Application time now, see
+                            ec_fsm_master_app_time_now(). */
         )
 {
     ec_slave_t *slave = fsm->slave;
@@ -1375,13 +1384,13 @@ uint64_t ec_fsm_master_dc_offset32(
     // correct read system time by elapsed time since read operation
     correction = ec_time_to_ns(time_since_read);
     system_time32 += correction;
-    time_diff = (uint32_t) slave->master->app_time - system_time32;
+    time_diff = (uint32_t) app_time - system_time32;
 
     EC_SLAVE_DBG(slave, 1, "DC 32 bit system time offset calculation:"
             " system_time=%u (corrected with %u),"
             " app_time=%llu, diff=%i\n",
             system_time32, correction,
-            (unsigned long long) slave->master->app_time, time_diff);
+            (unsigned long long) app_time, time_diff);
 
     if (EC_ABS(time_diff) > EC_SYSTEM_TIME_TOLERANCE_NS) {
         new_offset = time_diff + old_offset32;
@@ -1404,7 +1413,9 @@ uint64_t ec_fsm_master_dc_offset64(
         ec_fsm_master_t *fsm, /**< Master state machine. */
         uint64_t system_time, /**< System time register. */
         uint64_t old_offset, /**< Time offset register. */
-        ec_time_t time_since_read /**< Time for correction. */
+        ec_time_t time_since_read, /**< Time for correction. */
+        uint64_t app_time /**< Application time now, see
+                            ec_fsm_master_app_time_now(). */
         )
 {
     ec_slave_t *slave = fsm->slave;
@@ -1414,14 +1425,14 @@ uint64_t ec_fsm_master_dc_offset64(
     // correct read system time by elapsed time since read operation
     correction = (uint64_t) ec_time_to_ns(time_since_read);
     system_time += correction;
-    time_diff = fsm->slave->master->app_time - system_time;
+    time_diff = app_time - system_time;
 
     EC_SLAVE_DBG(slave, 1, "DC 64 bit system time offset calculation:"
             " system_time=%llu (corrected with %llu),"
             " app_time=%llu, diff=%lli\n",
             (unsigned long long) system_time,
             (unsigned long long) correction,
-            (unsigned long long) slave->master->app_time,
+            (unsigned long long) app_time,
             (long long) time_diff);
 
     if (EC_ABS(time_diff) > EC_SYSTEM_TIME_TOLERANCE_NS) {
@@ -1439,6 +1450,33 @@ uint64_t ec_fsm_master_dc_offset64(
 
 /****************************************************************************/
 
+/** The application time at \a now.
+ *
+ * The master state machine runs in its own thread, so app_time, given by
+ * the application once per cycle, may be up to a cycle old here. The
+ * slave's system time is corrected to \a now, so app_time must be too: an
+ * offset calculated against the old app_time is wrong by its age, a random
+ * part of a cycle (measured: 330-630 us at 1 ms).
+ *
+ * The application sets app_time and its stamp without a lock; if it does
+ * so while this runs, the result can be off by one cycle, as it always was.
+ */
+static uint64_t ec_fsm_master_app_time_now(
+        const ec_master_t *master, /**< EtherCAT master. */
+        ec_time_t now /**< ec_current_time() */
+        )
+{
+    ec_time_t stamp = master->app_time_stamp;
+    uint64_t app_time = master->app_time;
+
+    if (!stamp || now < stamp) {
+        return app_time;
+    }
+    return app_time + (uint64_t) ec_time_to_ns(now - stamp);
+}
+
+/****************************************************************************/
+
 /** Master state: DC READ OFFSET.
  */
 void ec_fsm_master_state_dc_read_offset(
@@ -1447,8 +1485,8 @@ void ec_fsm_master_state_dc_read_offset(
 {
     ec_datagram_t *datagram = fsm->datagram;
     ec_slave_t *slave = fsm->slave;
-    uint64_t system_time, old_offset, new_offset;
-    ec_time_t time_since_read;
+    uint64_t system_time, old_offset, new_offset, app_time;
+    ec_time_t now, time_since_read;
 
     if (datagram->state == EC_DATAGRAM_TIMED_OUT && fsm->retries--)
         return;
@@ -1471,14 +1509,16 @@ void ec_fsm_master_state_dc_read_offset(
 
     system_time = EC_READ_U64(datagram->data);     // 0x0910
     old_offset = EC_READ_U64(datagram->data + 16); // 0x0920
-    time_since_read = ec_current_time() - datagram->time_sent;
+    now = ec_current_time();
+    time_since_read = now - datagram->time_sent;
+    app_time = ec_fsm_master_app_time_now(fsm->master, now);
 
     if (slave->base_dc_range == EC_DC_32) {
         new_offset = ec_fsm_master_dc_offset32(fsm,
-                system_time, old_offset, time_since_read);
+                system_time, old_offset, time_since_read, app_time);
     } else {
         new_offset = ec_fsm_master_dc_offset64(fsm,
-                system_time, old_offset, time_since_read);
+                system_time, old_offset, time_since_read, app_time);
     }
 
     // set DC system time offset and transmission delay

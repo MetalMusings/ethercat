@@ -211,6 +211,8 @@ struct ec_master {
     struct list_head domains; /**< List of domains. */
 
     EC_PAL_SHARED uint64_t app_time; /**< Time of the last ecrt_master_sync() call. */
+    EC_PAL_SHARED ec_time_t app_time_stamp; /**< ec_current_time() when app_time
+                                              was given; 0 if never. */
     EC_PAL_SHARED uint64_t dc_ref_time; /**< Common reference timestamp for DC start times. */
     ec_datagram_t ref_sync_datagram; /**< Datagram used for synchronizing the
                                        reference clock to the master clock. */
