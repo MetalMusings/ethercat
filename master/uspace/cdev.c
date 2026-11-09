@@ -81,6 +81,8 @@
 typedef struct {
     _Atomic int      sock_fd;        /**< Listening socket fd (-1 if inactive). Handshake between listener thread and ec_ipc_server_stop(). */
     char             sock_path[UNIX_PATH_MAX]; /**< Unix socket filesystem path. */
+    dev_t            sock_dev;       /**< Device and inode of the socket file this */
+    ino_t            sock_ino;       /**< server created, so that it removes only its own. */
     ec_thread_t     *thread;         /**< Listener thread handle. */
     atomic_int       shutdown;       /**< Non-zero to request shutdown. */
 } ec_cdev_t;
@@ -1309,6 +1311,31 @@ static int listener_fn(void *arg)
 /* Public API                                                                  */
 /****************************************************************************/
 
+/** Whether a server answers on the Unix socket at \a path: another master
+ *  serving the tool. A file nobody listens on (left by a master that died)
+ *  does not answer. */
+static int ipc_socket_alive(const struct sockaddr_un *addr)
+{
+    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    int alive;
+
+    if (fd < 0)
+        return 0;
+    alive = connect(fd, (const struct sockaddr *)addr, sizeof(*addr)) == 0;
+    close(fd);
+    return alive;
+}
+
+/** Remove the socket file if it is still the one this server created. */
+static void ipc_unlink_own(ec_cdev_t *cdev)
+{
+    struct stat st;
+
+    if (stat(cdev->sock_path, &st) == 0 && S_ISSOCK(st.st_mode)
+            && st.st_dev == cdev->sock_dev && st.st_ino == cdev->sock_ino)
+        unlink(cdev->sock_path);
+}
+
 /**
  * ec_ipc_server_start - start the global IPC server.
  *
@@ -1346,13 +1373,23 @@ int ec_ipc_server_start(const char *socket_path)
         return -errno;
     }
 
-    /* Remove any stale socket file. */
-    unlink(cdev->sock_path);
-
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
     /* sock_path fits sun_path (both UNIX_PATH_MAX, length checked above). */
     memcpy(addr.sun_path, cdev->sock_path, strlen(cdev->sock_path) + 1);
+
+    /* Another master (on another network interface) may serve the tool on
+     * this path. Taking it over would leave that master unreachable, and
+     * removing it at our stop would leave it without a socket at all; so
+     * keep away, and run without the tool. Only a stale file, which nobody
+     * answers on, is removed. */
+    if (ipc_socket_alive(&addr)) {
+        ec_log(EC_LOG_ERR, "IPC: another master serves the tool on %s;"
+                " this one runs without it\n", cdev->sock_path);
+        close(sock_fd);
+        return -EADDRINUSE;
+    }
+    unlink(cdev->sock_path);
 
     if (bind(sock_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         ret = -errno;
@@ -1360,6 +1397,13 @@ int ec_ipc_server_start(const char *socket_path)
                 cdev->sock_path, strerror(errno));
         close(sock_fd);
         return ret;
+    }
+    {
+        struct stat st;
+        if (stat(cdev->sock_path, &st) == 0) {
+            cdev->sock_dev = st.st_dev;
+            cdev->sock_ino = st.st_ino;
+        }
     }
 
     /* The tool API includes write operations (SDO download, state changes,
@@ -1373,7 +1417,7 @@ int ec_ipc_server_start(const char *socket_path)
         ec_log(EC_LOG_ERR, "IPC: chmod() of %s failed: %s\n",
                 cdev->sock_path, strerror(errno));
         close(sock_fd);
-        unlink(cdev->sock_path);
+        ipc_unlink_own(cdev);
         return ret;
     }
 
@@ -1381,7 +1425,7 @@ int ec_ipc_server_start(const char *socket_path)
         ret = -errno;
         ec_log(EC_LOG_ERR, "IPC: listen() failed: %s\n", strerror(errno));
         close(sock_fd);
-        unlink(cdev->sock_path);
+        ipc_unlink_own(cdev);
         return ret;
     }
 
@@ -1395,7 +1439,7 @@ int ec_ipc_server_start(const char *socket_path)
         ec_log(EC_LOG_ERR, "IPC: failed to start listener thread: %d\n", ret);
         close(cdev->sock_fd);
         cdev->sock_fd = -1;
-        unlink(cdev->sock_path);
+        ipc_unlink_own(cdev);
         return ret;
     }
 
@@ -1435,8 +1479,9 @@ void ec_ipc_server_stop(void)
     close(cdev->sock_fd);
     cdev->sock_fd = -1;
 
-    /* Remove the socket file. */
-    unlink(cdev->sock_path);
+    /* Remove the socket file, unless another master has put its own there
+     * since (an older master removed a live socket at start). */
+    ipc_unlink_own(cdev);
 
     ec_log(EC_LOG_INFO, "IPC server on %s stopped\n", cdev->sock_path);
 }

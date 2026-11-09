@@ -42,6 +42,8 @@
 #include <grp.h>
 #include <errno.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <sys/file.h>
 
 /****************************************************************************/
@@ -112,6 +114,27 @@ static int lock_interface(const char *interface, pid_t *holder)
         /* The lock still works without the PID; only a handover needs it. */
     }
     return 0; /* fd deliberately left open */
+}
+
+/****************************************************************************/
+
+/** Whether another process serves the tool on the Unix socket \a path. */
+static int socket_served(const char *path)
+{
+    struct sockaddr_un addr;
+    int fd, served;
+
+    if (!path || strlen(path) >= sizeof(addr.sun_path))
+        return 0;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    memcpy(addr.sun_path, path, strlen(path) + 1);
+    fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (fd < 0)
+        return 0;
+    served = connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0;
+    close(fd);
+    return served;
 }
 
 /****************************************************************************/
@@ -409,6 +432,15 @@ int main(int argc, char *argv[])
             return 1;
         }
         socket_gid = grp->gr_gid;
+    }
+
+    /* This program exists to serve the tool: without the socket it would
+     * hold the bus for nobody (and -g would change the other's socket).
+     * Checked before daemonizing, so that the message reaches the user. */
+    if (socket_served(g_socket_path)) {
+        fprintf(stderr, "Error: another master serves the tool on %s; stop it"
+                " first, or give this one another --socket\n", g_socket_path);
+        return 1;
     }
 
     /* Set up logging */

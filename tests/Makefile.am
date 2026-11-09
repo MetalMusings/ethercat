@@ -37,6 +37,7 @@ check_PROGRAMS = \
 	test_datagram \
 	test_dict_gate \
 	test_emerg_ring \
+	test_ipc_socket \
 	test_irq_pin \
 	test_pdo_print \
 	test_rt_pagefault \
@@ -68,6 +69,7 @@ LDADD = $(top_builddir)/master/uspace/libethercat.la
 AM_LDFLAGS = -static
 
 test_datagram_SOURCES = test_datagram.c test.h
+test_ipc_socket_SOURCES = test_ipc_socket.c test.h
 test_dict_gate_SOURCES = test_dict_gate.c test.h
 test_emerg_ring_SOURCES = test_emerg_ring.c test.h
 test_irq_pin_SOURCES = test_irq_pin.c test.h
