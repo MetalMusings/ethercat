@@ -734,6 +734,17 @@ int ec_fsm_slave_action_process_dict(
         return 0;
     }
 
+    /* Not while the slave waits for configuration (the test of
+     * ec_fsm_master_fill_config_slot): the master FSM defers it while this
+     * FSM is busy, and a fetch that yielded to the state change
+     * (ec_fsm_coe_dict_yield_to_config) and started again at once kept it
+     * busy -- the two took turns until the dictionary was complete, and a
+     * request for PREOP right after start timed out. */
+    if ((slave->current_state != slave->requested_state
+                || slave->force_config) && !slave->error_flag) {
+        return 0;
+    }
+
     /* Check, if the slave has an SDO dictionary to read out.
      *
      * time_preop stays zero until this master has driven the slave into PREOP

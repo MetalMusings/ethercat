@@ -10,7 +10,12 @@
  *
  *    - master->allow_sdo_dict, granted only once no slave needs
  *      configuration;
- *    - the slave has settled in PREOP for EC_WAIT_SDO_DICT seconds.
+ *    - the slave has settled in PREOP for EC_WAIT_SDO_DICT seconds;
+ *    - the slave has no state change pending.  The master FSM defers
+ *      configuring a slave whose own FSM is busy; a fetch that yielded to a
+ *      state change and started again at once kept it busy, and the two
+ *      took turns until the dictionary was complete (a request for PREOP
+ *      right after start timed out).
  *
  *  The second is measured from slave->time_preop, which stays zero until
  *  this master drives the slave into PREOP itself.  Measuring an elapsed
@@ -50,6 +55,9 @@ static void arm(int fetched)
 {
     slave.sdo_dictionary_fetched = fetched ? 1 : 0;
     slave.current_state = EC_SLAVE_STATE_PREOP;
+    slave.requested_state = EC_SLAVE_STATE_PREOP; /* settled, nothing pending */
+    slave.force_config = 0;
+    slave.error_flag = 0;
 
     ec_fsm_slave_clear(&fsm);
     ec_fsm_slave_init(&fsm, &slave);
@@ -116,6 +124,28 @@ int main(void)
     /* 5. And it is fetched once: a second pass finds it done. */
     arm(1);
     TEST_CHECK_EQ(0, ec_fsm_slave_action_process_dict(&fsm, &datagram));
+
+    /* 6. Settled, not fetched, but a state change is pending (a fetch that
+     *    yielded to it clears the flag): no fetch until the slave has been
+     *    configured, so the master FSM finds its FSM idle. */
+    arm(0);
+    slave.requested_state = EC_SLAVE_STATE_OP;
+    TEST_CHECK_EQ(0, ec_fsm_slave_action_process_dict(&fsm, &datagram));
+    TEST_CHECK_EQ(0, slave.sdo_dictionary_fetched);
+    TEST_CHECK(ec_fsm_slave_is_ready(&fsm));
+
+    /* 7. The same for a forced reconfiguration. */
+    arm(0);
+    slave.force_config = 1;
+    TEST_CHECK_EQ(0, ec_fsm_slave_action_process_dict(&fsm, &datagram));
+    TEST_CHECK(ec_fsm_slave_is_ready(&fsm));
+
+    /* 8. A slave in error is not configured until the error is cleared:
+     *    nothing to wait for, the fetch may run. */
+    arm(0);
+    slave.requested_state = EC_SLAVE_STATE_OP;
+    slave.error_flag = 1;
+    TEST_CHECK_EQ(1, ec_fsm_slave_action_process_dict(&fsm, &datagram));
 
     ec_datagram_clear(&datagram);
     ec_fsm_slave_clear(&fsm);
