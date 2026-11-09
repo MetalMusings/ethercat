@@ -54,6 +54,11 @@
  * - Added the dc_sync_failed bit to ec_slave_config_state_t and the
  *   EC_HAVE_DC_SYNC_FAILED definition to check for it. The bit fits in the
  *   structure's existing unsigned int, so its size is unchanged.
+ * - Added ecrt_master_request_al_state() and the EC_HAVE_REQUEST_AL_STATE
+ *   definition, so that an application can take its slaves down to PREOP
+ *   while it still exchanges process data. ecrt_master_deactivate() of the
+ *   userspace master also exchanges process data with zero outputs until
+ *   the slaves are in PREOP (at most a second) before it stops.
  * - ECRT_VER_MAJOR/ECRT_VER_MINOR deliberately stay at 1.6: the
  *   interface inherited from upstream is unchanged and the additions
  *   above are additive, so applications built against upstream 1.6
@@ -275,6 +280,10 @@
 /** Defined, if ec_slave_config_state_t has the dc_sync_failed bit.
  */
 #define EC_HAVE_DC_SYNC_FAILED
+
+/** Defined, if ecrt_master_request_al_state() exists.
+ */
+#define EC_HAVE_REQUEST_AL_STATE
 
 /****************************************************************************/
 
@@ -1535,6 +1544,32 @@ EC_PUBLIC_API uint32_t ecrt_master_sync_monitor_process(
  */
 EC_PUBLIC_API int ecrt_master_reset(
         ec_master_t *master /**< EtherCAT master. */
+        ) ECRT_RT_ATTR;
+
+/** Request an application-layer state for all slaves.
+ *
+ * The master takes every slave to the requested state, as the "ethercat
+ * states" command does, also while the application runs. It is meant for
+ * an orderly stop: request EC_AL_STATE_PREOP while process data is still
+ * exchanged every cycle, wait until no slave is above PREOP (see
+ * ecrt_master_state()), then stop the cycle. Slaves that lose their
+ * process data in SAFEOP or OP stop with an error (sync manager watchdog,
+ * synchronization error) instead. ecrt_master_reset() takes them back to
+ * OP.
+ *
+ * Only the userspace master implements it; the library for the kernel
+ * master returns -EOPNOTSUPP.
+ *
+ * piusage{master_op,rt_safe}
+ *
+ * 
+eturn 0 on success, otherwise negative error code.
+ * 
+etval -EINVAL The state is not INIT, PREOP, SAFEOP or OP.
+ */
+EC_PUBLIC_API int ecrt_master_request_al_state(
+        ec_master_t *master, /**< EtherCAT master. */
+        ec_al_state_t state /**< EC_AL_STATE_INIT, _PREOP, _SAFEOP or _OP. */
         ) ECRT_RT_ATTR;
 
 /*****************************************************************************

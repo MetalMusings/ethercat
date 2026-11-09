@@ -2198,6 +2198,106 @@ int ecrt_master_activate(ec_master_t *master)
 
 /****************************************************************************/
 
+#ifdef EC_USPACE_MASTER
+
+/** Longest time ec_master_take_down() exchanges process data [ns]. */
+#define EC_TAKE_DOWN_TIMEOUT_NS 1000000000ULL
+
+/** Takes the slaves to PREOP while process data still flows.
+ *
+ * The userspace master lives in the application: once the application's
+ * cycle stops, no frames reach the slaves until the idle thread runs.
+ * Slaves in SAFEOP or OP then see their sync manager watchdog expire, or
+ * SYNC0 come without process data, and stop in SAFEOP + ERROR (AL status
+ * 0x001B, 0x001A); CiA 402 drives also latch a communication fault (such
+ * as 0x7500). So, while the operation thread still runs, this requests
+ * PREOP for every slave and exchanges process data with every output set
+ * to zero, at the send interval, until no slave is above PREOP or a second
+ * has passed.
+ *
+ * Called by ecrt_master_deactivate(), which the application must not call
+ * while its cyclic task still runs.
+ */
+static void ec_master_take_down(ec_master_t *master)
+{
+    ec_slave_t *slave;
+    ec_domain_t *domain;
+    struct timespec next, start, end;
+    unsigned long long interval_ns, elapsed_ns = 0;
+    unsigned int above;
+
+    above = 0;
+    for (slave = master->slaves;
+            slave < master->slaves + master->slave_count; slave++) {
+        if ((slave->current_state & 0x0F) > EC_SLAVE_STATE_PREOP) {
+            above++;
+        }
+    }
+    if (!above) {
+        return;
+    }
+
+    interval_ns = (unsigned long long) master->send_interval * 1000ULL;
+    if (interval_ns < 250000ULL) {
+        interval_ns = 250000ULL;
+    } else if (interval_ns > 10000000ULL) {
+        interval_ns = 10000000ULL;
+    }
+
+    for (slave = master->slaves;
+            slave < master->slaves + master->slave_count; slave++) {
+        ec_slave_request_state(slave, EC_SLAVE_STATE_PREOP);
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    next = start;
+    while (1) {
+        ecrt_master_receive(master);
+        list_for_each_entry(domain, &master->domains, list) {
+            ecrt_domain_process(domain);
+            if (domain->data) {
+                memset(domain->data, 0, domain->data_size);
+            }
+            ecrt_domain_queue(domain);
+        }
+        ecrt_master_send(master);
+
+        above = 0;
+        for (slave = master->slaves;
+                slave < master->slaves + master->slave_count; slave++) {
+            if ((slave->current_state & 0x0F) > EC_SLAVE_STATE_PREOP) {
+                above++;
+            }
+        }
+        clock_gettime(CLOCK_MONOTONIC, &end);
+        elapsed_ns = (end.tv_sec - start.tv_sec) * 1000000000ULL
+            + end.tv_nsec - start.tv_nsec;
+        if (!above || elapsed_ns >= EC_TAKE_DOWN_TIMEOUT_NS) {
+            break;
+        }
+
+        next.tv_nsec += interval_ns;
+        while (next.tv_nsec >= 1000000000L) {
+            next.tv_nsec -= 1000000000L;
+            next.tv_sec++;
+        }
+        clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &next, NULL);
+    }
+
+    if (above) {
+        EC_MASTER_WARN(master, "%u slave(s) still above PREOP after %llu ms"
+                " of process data with zero outputs.\n", above,
+                elapsed_ns / 1000000ULL);
+    } else {
+        EC_MASTER_INFO(master, "Slaves taken to PREOP in %llu ms,"
+                " outputs zero.\n", elapsed_ns / 1000000ULL);
+    }
+}
+
+#endif
+
+/****************************************************************************/
+
 int ecrt_master_deactivate(ec_master_t *master)
 {
     ec_slave_t *slave;
@@ -2212,6 +2312,10 @@ int ecrt_master_deactivate(ec_master_t *master)
         EC_MASTER_WARN(master, "%s: Master not active.\n", __func__);
         return -EINVAL;
     }
+
+#ifdef EC_USPACE_MASTER
+    ec_master_take_down(master);
+#endif
 
     ec_master_thread_stop(master);
 #ifdef EC_EOE
@@ -3124,6 +3228,28 @@ int ecrt_master_reset(ec_master_t *master)
         if (sc->slave) {
             ec_slave_request_state(sc->slave, EC_SLAVE_STATE_OP);
         }
+    }
+    return 0;
+}
+
+/****************************************************************************/
+
+int ecrt_master_request_al_state(ec_master_t *master, ec_al_state_t state)
+{
+    ec_slave_t *slave;
+
+    switch (state) {
+        case EC_AL_STATE_INIT:
+        case EC_AL_STATE_PREOP:
+        case EC_AL_STATE_SAFEOP:
+        case EC_AL_STATE_OP:
+            break;
+        default:
+            return -EINVAL;
+    }
+    for (slave = master->slaves;
+            slave < master->slaves + master->slave_count; slave++) {
+        ec_slave_request_state(slave, (ec_slave_state_t) state);
     }
     return 0;
 }

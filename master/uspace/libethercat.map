@@ -39,6 +39,7 @@ ecrt_master_receive;
 ecrt_master_reference_clock_time;
 ecrt_master_reserve;
 ecrt_master_reset;
+ecrt_master_request_al_state;
 ecrt_master_scan_progress;
 ecrt_master_sdo_download;
 ecrt_master_sdo_download_complete;

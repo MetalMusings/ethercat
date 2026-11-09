@@ -821,3 +821,12 @@ int ecrt_master_reset(ec_master_t *master)
 }
 
 /****************************************************************************/
+
+int ecrt_master_request_al_state(ec_master_t *master, ec_al_state_t state)
+{
+    (void) master;
+    (void) state;
+    return -EOPNOTSUPP;  // only the userspace master implements it
+}
+
+/****************************************************************************/
