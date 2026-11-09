@@ -51,6 +51,9 @@
  *   that is safe to call from the cyclic path and are verifiable with
  *   clang's function-effects analysis. They expand to nothing on other
  *   compilers, so the ABI is unchanged.
+ * - Added the dc_sync_failed bit to ec_slave_config_state_t and the
+ *   EC_HAVE_DC_SYNC_FAILED definition to check for it. The bit fits in the
+ *   structure's existing unsigned int, so its size is unchanged.
  * - ECRT_VER_MAJOR/ECRT_VER_MINOR deliberately stay at 1.6: the
  *   interface inherited from upstream is unchanged and the additions
  *   above are additive, so applications built against upstream 1.6
@@ -269,6 +272,10 @@
  */
 #define EC_HAVE_STATE_TIMEOUT
 
+/** Defined, if ec_slave_config_state_t has the dc_sync_failed bit.
+ */
+#define EC_HAVE_DC_SYNC_FAILED
+
 /****************************************************************************/
 
 /** Symbol visibility control macro.
@@ -437,6 +444,13 @@ typedef struct  {
 
                                  Note that each state is coded in a different
                                  bit! */
+    unsigned int dc_sync_failed : 1; /**< The slave's last DC sync check
+                                       timed out: its clock was not within
+                                       10 us of the reference clock after
+                                       5 s, and SYNC0 was started anyway.
+                                       Cleared when a later configuration
+                                       passes the check. Only the userspace
+                                       master sets it. */
 } ec_slave_config_state_t;
 
 /****************************************************************************/

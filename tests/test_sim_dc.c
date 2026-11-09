@@ -153,6 +153,8 @@ int main(void)
     }
     TEST_CHECK(reached >= 5);
     (void) sync_mon;
+    /* the sync check passed: the clock was within 10 us at once */
+    TEST_CHECK_EQ(0, sc_state.dc_sync_failed);
 
     /* The loop ends right after send(): receive the last frame so the
      * sync datagram is in RECEIVED state before querying it. */

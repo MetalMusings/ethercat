@@ -1479,6 +1479,7 @@ void ec_fsm_slave_config_state_dc_cycle(
     }
 
     EC_SLAVE_DBG(slave, 1, "Checking for synchrony.\n");
+    slave->dc_sync_failed = 0;
 
     fsm->time_start = ec_current_time();
     ec_datagram_fprd(datagram, slave->station_address, 0x092c, 4);
@@ -1536,8 +1537,11 @@ void ec_fsm_slave_config_state_dc_sync_check(
     if (abs_sync_diff > EC_DC_MAX_SYNC_DIFF_NS) {
 
         if (diff_ms >= EC_DC_SYNC_WAIT_MS) {
+            // SYNC0 is started anyway, as before; the application sees
+            // dc_sync_failed in ecrt_slave_config_state()
             EC_SLAVE_WARN(slave, "Slave did not sync after %lu ms.\n",
                     diff_ms);
+            slave->dc_sync_failed = 1;
         } else {
             EC_SLAVE_DBG(slave, 1, "Sync after %4lu ms: %10u ns\n",
                     diff_ms, abs_sync_diff);

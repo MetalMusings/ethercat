@@ -185,6 +185,10 @@ struct ec_slave
     EC_PAL_SHARED unsigned int error_flag; /**< Stop processing after an error. */
     EC_PAL_SHARED uint16_t al_status_code; /**< AL status code of the last
                                              refused state change; 0 for none. */
+    EC_PAL_SHARED unsigned int dc_sync_failed; /**< The last DC sync check
+                                                   timed out: SYNC0 was started
+                                                   with the slave's clock not
+                                                   synchronized. */
     EC_PAL_SHARED unsigned int force_config; /**< Force
                                                (re-)configuration. */
     uint16_t configured_rx_mailbox_offset; /**< Configured receive mailbox

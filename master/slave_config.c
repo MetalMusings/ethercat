@@ -1386,9 +1386,11 @@ int ecrt_slave_config_state(const ec_slave_config_t *sc,
         state->operational =
             slave->current_state == EC_SLAVE_STATE_OP && !slave->force_config;
         state->al_state = slave->current_state;
+        state->dc_sync_failed = slave->dc_sync_failed ? 1 : 0;
     } else {
         state->operational = 0;
         state->al_state = EC_SLAVE_STATE_UNKNOWN;
+        state->dc_sync_failed = 0;
     }
     return 0;
 }
