@@ -223,6 +223,10 @@ struct ec_master {
     ec_slave_config_t *dc_ref_config; /**< Application-selected DC reference
                                         clock slave config. */
     ec_slave_t *dc_ref_clock; /**< DC reference clock slave. */
+    EC_PAL_SHARED unsigned int ref_clock_synced; /**< The application has
+                                                   synchronized the reference
+                                                   clock to its time
+                                                   (ecrt_master_sync_reference_clock[_to]()). */
 
     EC_PAL_SHARED unsigned int scan_busy; /**< Current scan state. */
     EC_PAL_SHARED unsigned int scan_index; /**< Index of slave currently scanned. */

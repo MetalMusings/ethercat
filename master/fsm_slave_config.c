@@ -105,6 +105,7 @@ void ec_fsm_slave_config_enter_watchdog(ec_fsm_slave_config_t *, ec_datagram_t *
 void ec_fsm_slave_config_enter_pdo_sync(ec_fsm_slave_config_t *, ec_datagram_t *);
 void ec_fsm_slave_config_enter_fmmu(ec_fsm_slave_config_t *, ec_datagram_t *);
 void ec_fsm_slave_config_enter_dc_cycle(ec_fsm_slave_config_t *, ec_datagram_t *);
+static void ec_fsm_slave_config_enter_dc_start(ec_fsm_slave_config_t *, ec_datagram_t *);
 void ec_fsm_slave_config_enter_wait_safeop(ec_fsm_slave_config_t *, ec_datagram_t *);
 void ec_fsm_slave_config_enter_safeop(ec_fsm_slave_config_t *, ec_datagram_t *);
 void ec_fsm_slave_config_enter_soe_conf_safeop(ec_fsm_slave_config_t *, ec_datagram_t *);
@@ -1478,8 +1479,21 @@ void ec_fsm_slave_config_state_dc_cycle(
         return;
     }
 
-    EC_SLAVE_DBG(slave, 1, "Checking for synchrony.\n");
     slave->dc_sync_failed = 0;
+
+    // The reference clock is checked against the time the application writes
+    // to it. If the application does not synchronize it (the application
+    // follows the reference clock instead), nothing updates its system time
+    // difference, and the register keeps an old value: there is nothing to
+    // check.
+    if (slave == slave->master->dc_ref_clock && !slave->master->ref_clock_synced) {
+        EC_SLAVE_DBG(slave, 1, "Reference clock, not synchronized to the"
+                " application time: no sync check.\n");
+        ec_fsm_slave_config_enter_dc_start(fsm, datagram);
+        return;
+    }
+
+    EC_SLAVE_DBG(slave, 1, "Checking for synchrony.\n");
 
     fsm->time_start = ec_current_time();
     ec_datagram_fprd(datagram, slave->station_address, 0x092c, 4);
@@ -1498,20 +1512,14 @@ void ec_fsm_slave_config_state_dc_sync_check(
         )
 {
     ec_slave_t *slave = fsm->slave;
-    ec_master_t *master = slave->master;
     ec_slave_config_t *config = slave->config;
     uint32_t abs_sync_diff;
     unsigned long diff_ms;
-    ec_sync_signal_t *sync0, *sync1;
-    uint64_t start_time;
 
     if (!config) { // config removed in the meantime
         ec_fsm_slave_config_reconfigure(fsm, datagram);
         return;
     }
-
-    sync0 = &config->dc_sync[0];
-    sync1 = &config->dc_sync[1];
 
     if (datagram->state == EC_DATAGRAM_TIMED_OUT && fsm->retries--)
         return;
@@ -1555,6 +1563,25 @@ void ec_fsm_slave_config_state_dc_sync_check(
         EC_SLAVE_DBG(slave, 1, "%u ns difference after %lu ms.\n",
                 abs_sync_diff, diff_ms);
     }
+
+    ec_fsm_slave_config_enter_dc_start(fsm, datagram);
+}
+
+/****************************************************************************/
+
+/** Set the DC cyclic operation start time and go on to DC START.
+ */
+static void ec_fsm_slave_config_enter_dc_start(
+        ec_fsm_slave_config_t *fsm, /**< slave state machine */
+        ec_datagram_t *datagram /**< Datagram to use. */
+        )
+{
+    ec_slave_t *slave = fsm->slave;
+    ec_master_t *master = slave->master;
+    ec_slave_config_t *config = slave->config;
+    ec_sync_signal_t *sync0 = &config->dc_sync[0];
+    ec_sync_signal_t *sync1 = &config->dc_sync[1];
+    uint64_t start_time;
 
     // set DC start time (roughly in the future, not in-phase)
     start_time = master->app_time + EC_DC_START_OFFSET; // now + X ns

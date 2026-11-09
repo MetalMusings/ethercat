@@ -172,6 +172,7 @@ int ec_master_init(ec_master_t *master, /**< EtherCAT master */
 
     master->app_time = 0ULL;
     master->app_time_stamp = 0;
+    master->ref_clock_synced = 0;
     master->dc_ref_time = 0ULL;
 
     master->scan_busy = 0;
@@ -2247,6 +2248,7 @@ int ecrt_master_deactivate(ec_master_t *master)
 
     master->app_time = 0ULL;
     master->app_time_stamp = 0;
+    master->ref_clock_synced = 0;
     master->dc_ref_time = 0ULL;
 
 #ifdef EC_EOE
@@ -2652,6 +2654,7 @@ int ecrt_master_sync_reference_clock(ec_master_t *master)
     if (master->dc_ref_clock) {
         EC_WRITE_U32(master->ref_sync_datagram.data, master->app_time);
         ec_master_queue_datagram(master, &master->ref_sync_datagram);
+        master->ref_clock_synced = 1;
     } else {
         return -ENXIO;
     }
@@ -2668,6 +2671,7 @@ int ecrt_master_sync_reference_clock_to(
     if (master->dc_ref_clock) {
         EC_WRITE_U32(master->ref_sync_datagram.data, sync_time);
         ec_master_queue_datagram(master, &master->ref_sync_datagram);
+        master->ref_clock_synced = 1;
     } else {
         return -ENXIO;
     }

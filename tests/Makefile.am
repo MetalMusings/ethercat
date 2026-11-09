@@ -44,6 +44,7 @@ check_PROGRAMS = \
 	test_sim_coe \
 	test_sim_dc \
 	test_sim_dc_sync_failed \
+	test_sim_dc_ref_clock \
 	test_sim_dict_bg \
 	test_sim_domain \
 	test_sim_eoe \
@@ -80,6 +81,7 @@ test_shared_SOURCES = test_shared.c test.h
 test_sim_coe_SOURCES = test_sim_coe.c test.h
 test_sim_dc_SOURCES = test_sim_dc.c test.h
 test_sim_dc_sync_failed_SOURCES = test_sim_dc_sync_failed.c test.h
+test_sim_dc_ref_clock_SOURCES = test_sim_dc_ref_clock.c test.h
 test_sim_dict_bg_SOURCES = test_sim_dict_bg.c test.h
 test_sim_domain_SOURCES = test_sim_domain.c test.h
 test_sim_eoe_SOURCES = test_sim_eoe.c test.h
