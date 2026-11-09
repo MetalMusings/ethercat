@@ -158,6 +158,47 @@ static void process_completion_queue(ec_transport_xdp_t *xdp, unsigned int max_f
 /****************************************************************************/
 
 /**
+ * Remove an XDP program left on the interface.
+ *
+ * A master that is killed (kill -9, a crash of the application) leaves its
+ * XDP program attached: xdp_close() never runs. The next start then fails
+ * in an application without CAP_SYS_ADMIN (LinuxCNC's rtapi_app), with
+ * "Permission denied" or "Device or resource busy", since libxdp cannot
+ * reuse a program it may not open. The caller owns the interface (the
+ * masters share a lock per interface), so a program still attached is
+ * stale. Detaching needs only CAP_NET_ADMIN, as in xdp_close().
+ *
+ * \return 1 if a program was removed, 0 if none was attached, negative on
+ *         error.
+ */
+static int xdp_remove_stale_program(int if_index, const char *interface)
+{
+    LIBBPF_OPTS(bpf_xdp_query_opts, opts);
+    int ret, removed = 0;
+
+    ret = bpf_xdp_query(if_index, 0, &opts);
+    if (ret < 0)
+        return ret;
+    if (opts.attach_mode == XDP_ATTACHED_NONE)
+        return 0;
+    fprintf(stderr, "An XDP program is left on %s (by a master that did not"
+            " stop); removing it\n", interface);
+    if (opts.skb_prog_id
+            && bpf_xdp_detach(if_index, XDP_FLAGS_SKB_MODE, NULL) == 0)
+        removed = 1;
+    if (opts.drv_prog_id
+            && bpf_xdp_detach(if_index, XDP_FLAGS_DRV_MODE, NULL) == 0)
+        removed = 1;
+    if (opts.hw_prog_id
+            && bpf_xdp_detach(if_index, XDP_FLAGS_HW_MODE, NULL) == 0)
+        removed = 1;
+    if (!removed)
+        fprintf(stderr, "Could not remove it; try: sudo ip link set dev %s"
+                " xdp off\n", interface);
+    return removed;
+}
+
+/**
  * Open XDP transport on interface.
  */
 static int xdp_open(ec_transport_t *transport, const char *interface,
@@ -254,6 +295,11 @@ static int xdp_open(ec_transport_t *transport, const char *interface,
     cfg.xdp_flags = xdp_flags;
     cfg.bind_flags = bind_flags;
     cfg.libbpf_flags = 0;
+
+    /* A program left by a master that did not stop makes the creation
+     * fail, and a failed attempt leaves libxdp unable to try again: remove
+     * it first. */
+    xdp_remove_stale_program(xdp->if_index, interface);
 
     /* Create XSK socket (queue 0) */
     ret = xsk_socket__create(&xdp->xsk, interface, 0, xdp->umem,
