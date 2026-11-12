@@ -32,6 +32,7 @@
 #include "test.h"
 
 static char path[108];
+static char keep[120];
 
 /** A listening socket at path, as another master's IPC server. */
 static int other_master(void)
@@ -77,8 +78,14 @@ int main(void)
     /* That master died and left its file: a stale socket is replaced. */
     close(other);
     TEST_CHECK(inode() == theirs);
+    /* A second link keeps the old inode allocated: the filesystem would
+     * otherwise hand its number to the new socket (seen on CI's ext4). */
+    snprintf(keep, sizeof(keep), "%s.keep", path);
+    unlink(keep);
+    TEST_CHECK(link(path, keep) == 0);
     TEST_CHECK_EQ(0, ec_ipc_server_start(path));
     TEST_CHECK(inode() != 0 && inode() != theirs);
+    unlink(keep);
 
     /* At stop the server removes its own socket. */
     ec_ipc_server_stop();
