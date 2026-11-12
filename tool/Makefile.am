@@ -124,12 +124,14 @@ REV = `if test -s $(top_srcdir)/revision; then \
 USPACE_TOOL_SRCS = \
 	uspace/CommandStart.cpp \
 	uspace/CommandStop.cpp \
-	uspace/Daemon.cpp
+	uspace/Daemon.cpp \
+	uspace/Offer.cpp
 
 USPACE_TOOL_HDRS = \
 	uspace/CommandStart.h \
 	uspace/CommandStop.h \
-	uspace/Daemon.h
+	uspace/Daemon.h \
+	uspace/Offer.h
 
 if ENABLE_USPACE_MASTER
 ethercat_SOURCES += uspace/MasterDeviceUspace.cpp $(USPACE_TOOL_SRCS)

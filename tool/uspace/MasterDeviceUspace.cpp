@@ -144,6 +144,7 @@ class MasterDeviceUspace : public MasterDeviceBackend
                     else
                         err << " Start one with: sudo " << binaryBaseName
                             << " start";
+                    throw MasterDeviceBackendNoMaster(err.str());
                 }
                 throw runtime_error(err.str());
             }

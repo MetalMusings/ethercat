@@ -63,6 +63,7 @@ using namespace std;
 #ifdef EC_USPACE_MASTER
 # include "uspace/CommandStart.h"
 # include "uspace/CommandStop.h"
+# include "uspace/Offer.h"
 #endif
 
 #include "MasterDevice.h"
@@ -374,6 +375,13 @@ int main(int argc, char **argv)
                 } catch (CommandException &e) {
                     cerr << e.what() << endl;
                     retval = 1;
+#ifdef EC_USPACE_MASTER
+                } catch (MasterDeviceNoMasterException &e) {
+                    /* Returns only if nothing was started. */
+                    UspaceDaemon::offerStart(argv, cmd->getName());
+                    cerr << e.what() << endl;
+                    retval = 1;
+#endif
                 } catch (MasterDeviceException &e) {
                     cerr << e.what() << endl;
                     retval = 1;

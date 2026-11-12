@@ -23,9 +23,20 @@
 #define __MASTER_DEVICE_BACKEND_H__
 
 #include <stdint.h>
+#include <stdexcept>
 #include <string>
 
 /****************************************************************************/
+
+/** Thrown by a backend that finds no master to talk to (userspace: nothing
+ * listens on the socket). The tool may then offer to start one. */
+class MasterDeviceBackendNoMaster:
+    public std::runtime_error
+{
+    public:
+        MasterDeviceBackendNoMaster(const std::string &s):
+            std::runtime_error(s) {}
+};
 
 /** Abstract backend interface for MasterDevice.
  *

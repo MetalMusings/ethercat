@@ -72,6 +72,8 @@ void MasterDevice::open(Permissions perm)
 
     try {
         backend->open(index, perm == ReadWrite);
+    } catch (const MasterDeviceBackendNoMaster &e) {
+        throw MasterDeviceNoMasterException(string(e.what()));
     } catch (const runtime_error &e) {
         throw MasterDeviceException(string(e.what()));
     }

@@ -53,6 +53,19 @@ class MasterDeviceException:
 
 /****************************************************************************/
 
+/** No master is running (userspace backend: the socket does not answer). */
+class MasterDeviceNoMasterException:
+    public MasterDeviceException
+{
+    friend class MasterDevice;
+
+    protected:
+        MasterDeviceNoMasterException(const string &s):
+            MasterDeviceException(s) {}
+};
+
+/****************************************************************************/
+
 class MasterDeviceSdoAbortException:
     public MasterDeviceException
 {

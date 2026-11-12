@@ -302,6 +302,8 @@ Command::MasterIndexList Command::getMasterIndices() const
     try {
         MasterIndexParser p;
         indices = p.parse(masters.c_str());
+    } catch (MasterDeviceNoMasterException &) {
+        throw; /* main() may offer to start a master */
     } catch (MasterDeviceException &e) {
         stringstream err;
         err << "Failed to obtain number of masters: " << e.what();
