@@ -323,6 +323,16 @@ to the registered callback, with a stderr fallback if no callback is set.
 are redirected to `/dev/null`, so logging to stdout would silently discard
 all messages.
 
+The transports log through `ec_log()` too (`EC_ERR`, `EC_WARN`, `EC_INFO`),
+so an application's callback sees why a transport did not open. libbpf and
+libxdp, which the AF_XDP transport uses, print to stderr by default; the
+transport routes them into `ec_log()` (`libbpf_set_print()`,
+`libxdp_set_print()`) with their level, drops their debug messages, and
+leaves out what they say on every start of a working system (ELF sections
+libbpf does not know, libxdp's fallback to a single program without a
+mounted bpffs). Only the list of transport names that the tool prints
+stays on stderr.
+
 ## Build System
 
 ### Configure Option
