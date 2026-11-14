@@ -211,11 +211,15 @@ static int xdp_remove_stale_program(int if_index, const char *interface)
 
 /* What libbpf and libxdp say on every start on a working system: the ELF
  * sections libbpf does not know (libxdp's metadata) and libxdp's fallback
- * to a single program when no bpffs is mounted. Not logged. */
+ * to a single program when no bpffs is mounted. And what libxdp says on
+ * every close by an application that has dropped its privileges (LinuxCNC):
+ * it cannot update its refcount and asks to detach the program, which
+ * xdp_close() then does, and checks. Not logged. */
 static const char *const xdp_lib_quiet[] = {
     "skipping unrecognized data section",
     "Can't use dispatcher without a working bpffs",
     "Falling back to loading single prog without dispatcher",
+    "Error occurred when decrementing xsk XDP prog refcount",
     NULL
 };
 
@@ -454,9 +458,20 @@ static void xdp_close(ec_transport_t *transport)
 
         /* Safety net: forcibly detach XDP program if libxdp's cleanup
          * failed (e.g. due to dropped privileges). This is what ensures
-         * the next start won't get "Permission denied". Ignore errors. */
+         * the next start won't get "Permission denied". libxdp's own
+         * message about it is not logged (xdp_lib_quiet): say it here
+         * only if a program is still attached. */
         if (xdp->if_index > 0) {
+            LIBBPF_OPTS(bpf_xdp_query_opts, opts);
+
             bpf_xdp_detach(xdp->if_index, xdp->xdp_flags, NULL);
+            if (bpf_xdp_query(xdp->if_index, 0, &opts) == 0
+                    && opts.attach_mode != XDP_ATTACHED_NONE) {
+                EC_WARN("XDP: a program is still attached to %s; the next"
+                        " master removes it, or: sudo ip link set dev %s"
+                        " xdp off\n", transport->interface,
+                        transport->interface);
+            }
         }
 
         if (xdp->umem) {
