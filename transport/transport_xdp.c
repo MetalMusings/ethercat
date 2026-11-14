@@ -43,6 +43,8 @@
 #include "pal.h"
 #include <net/ethernet.h>
 #include <xdp/xsk.h>
+#include <xdp/libxdp.h>
+#include <bpf/libbpf.h>
 
 #include "pal_alloc.h"
 #include "ectp.h"
@@ -181,7 +183,7 @@ static int xdp_remove_stale_program(int if_index, const char *interface)
         return ret;
     if (opts.attach_mode == XDP_ATTACHED_NONE)
         return 0;
-    fprintf(stderr, "An XDP program is left on %s (by a master that did not"
+    EC_WARN("An XDP program is left on %s (by a master that did not"
             " stop); removing it\n", interface);
     if (opts.skb_prog_id
             && bpf_xdp_detach(if_index, XDP_FLAGS_SKB_MODE, NULL) == 0)
@@ -193,9 +195,74 @@ static int xdp_remove_stale_program(int if_index, const char *interface)
             && bpf_xdp_detach(if_index, XDP_FLAGS_HW_MODE, NULL) == 0)
         removed = 1;
     if (!removed)
-        fprintf(stderr, "Could not remove it; try: sudo ip link set dev %s"
+        EC_ERR("Could not remove it; try: sudo ip link set dev %s"
                 " xdp off\n", interface);
     return removed;
+}
+
+/****************************************************************************/
+/* libbpf and libxdp messages                                               */
+/*                                                                          */
+/* Both libraries print to stderr by default, past the master's log and so */
+/* past an application's log callback (ecrt_lib_init()). They are routed   */
+/* into ec_log() instead. Only reachable while a socket is opened or the   */
+/* program is loaded or removed, never from the cyclic path.               */
+/****************************************************************************/
+
+/* What libbpf and libxdp say on every start on a working system: the ELF
+ * sections libbpf does not know (libxdp's metadata) and libxdp's fallback
+ * to a single program when no bpffs is mounted. Not logged. */
+static const char *const xdp_lib_quiet[] = {
+    "skipping unrecognized data section",
+    "Can't use dispatcher without a working bpffs",
+    "Falling back to loading single prog without dispatcher",
+    NULL
+};
+
+static int ec_xdp_lib_message(int ec_level, const char *fmt, va_list ap)
+{
+    char msg[256];
+    size_t n;
+    unsigned int i;
+
+    vsnprintf(msg, sizeof(msg), fmt, ap);
+    for (i = 0; xdp_lib_quiet[i]; i++) {
+        if (strstr(msg, xdp_lib_quiet[i]))
+            return 0;
+    }
+    n = strlen(msg);
+    while (n > 0 && (msg[n - 1] == '\n' || msg[n - 1] == '\r'))
+        msg[--n] = '\0';
+    if (n == 0)
+        return 0;
+    ec_log(ec_level, "EtherCAT%s: %s\n",
+            ec_level <= EC_LOG_ERR ? " ERROR" :
+            ec_level == EC_LOG_WARNING ? " WARNING" : "", msg);
+    return 0;
+}
+
+static int xdp_libbpf_print(enum libbpf_print_level level, const char *fmt,
+        va_list ap)
+{
+    if (level == LIBBPF_DEBUG)
+        return 0;
+    return ec_xdp_lib_message(level == LIBBPF_WARN ? EC_LOG_WARNING
+            : EC_LOG_INFO, fmt, ap);
+}
+
+static int xdp_libxdp_print(enum libxdp_print_level level, const char *fmt,
+        va_list ap)
+{
+    if (level == LIBXDP_DEBUG)
+        return 0;
+    return ec_xdp_lib_message(level == LIBXDP_WARN ? EC_LOG_WARNING
+            : EC_LOG_INFO, fmt, ap);
+}
+
+static void xdp_lib_log_to_master(void)
+{
+    libbpf_set_print(xdp_libbpf_print);
+    libxdp_set_print(xdp_libxdp_print);
 }
 
 /**
@@ -227,7 +294,7 @@ static int xdp_open(ec_transport_t *transport, const char *interface,
     sock_fd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
     if (sock_fd < 0) {
         ret = -errno;
-        fprintf(stderr, "Failed to create socket: %s\n", strerror(errno));
+        EC_ERR("XDP: Failed to create socket: %s\n", strerror(errno));
         goto err_free;
     }
 
@@ -237,7 +304,7 @@ static int xdp_open(ec_transport_t *transport, const char *interface,
     ifr.ifr_name[IFNAMSIZ - 1] = '\0';
     if (ioctl(sock_fd, SIOCGIFINDEX, &ifr) < 0) {
         ret = -errno;
-        fprintf(stderr, "Failed to get interface index for %s: %s\n",
+        EC_ERR("XDP: Failed to get interface index for %s: %s\n",
                 interface, strerror(errno));
         close(sock_fd);
         goto err_free;
@@ -250,7 +317,7 @@ static int xdp_open(ec_transport_t *transport, const char *interface,
     ifr.ifr_name[IFNAMSIZ - 1] = '\0';
     if (ioctl(sock_fd, SIOCGIFHWADDR, &ifr) < 0) {
         ret = -errno;
-        fprintf(stderr, "Failed to get MAC address for %s: %s\n",
+        EC_ERR("XDP: Failed to get MAC address for %s: %s\n",
                 interface, strerror(errno));
         close(sock_fd);
         goto err_free;
@@ -264,7 +331,7 @@ static int xdp_open(ec_transport_t *transport, const char *interface,
      * no page faults or swapping occur on the RT cyclic TX/RX path. */
     xdp->umem_buffer = ec_rt_alloc_aligned(getpagesize(), NUM_FRAMES * FRAME_SIZE);
     if (!xdp->umem_buffer) {
-        fprintf(stderr, "Failed to allocate UMEM buffer\n");
+        EC_ERR("XDP: Failed to allocate UMEM buffer\n");
         ret = -ENOMEM;
         goto err_free;
     }
@@ -279,7 +346,7 @@ static int xdp_open(ec_transport_t *transport, const char *interface,
     ret = xsk_umem__create(&xdp->umem, xdp->umem_buffer, NUM_FRAMES * FRAME_SIZE,
                           &xdp->fq, &xdp->cq, NULL);
     if (ret) {
-        fprintf(stderr, "Failed to create UMEM: %s\n", strerror(-ret));
+        EC_ERR("XDP: Failed to create UMEM: %s\n", strerror(-ret));
         goto err_free_buffer;
     }
 
@@ -305,7 +372,7 @@ static int xdp_open(ec_transport_t *transport, const char *interface,
     ret = xsk_socket__create(&xdp->xsk, interface, 0, xdp->umem,
                             &xdp->rx, &xdp->tx, &cfg);
     if (ret) {
-        fprintf(stderr, "Failed to create XSK socket: %s\n", strerror(-ret));
+        EC_ERR("XDP: Failed to create XSK socket: %s\n", strerror(-ret));
         goto err_free_umem;
     }
 
@@ -318,7 +385,7 @@ static int xdp_open(ec_transport_t *transport, const char *interface,
     /* Populate fill queue */
     ret = xsk_ring_prod__reserve(&xdp->fq, XDP_FQ_FILL_SIZE, &idx);
     if (ret != XDP_FQ_FILL_SIZE) {
-        fprintf(stderr, "Failed to reserve fill queue\n");
+        EC_ERR("XDP: Failed to reserve fill queue\n");
         goto err_free_socket;
     }
 
@@ -354,6 +421,7 @@ err_free:
  */
 static int xdp_open_skb(ec_transport_t *transport, const char *interface)
 {
+    xdp_lib_log_to_master();
     return xdp_open(transport, interface, XDP_FLAGS_SKB_MODE,
                     XDP_COPY | XDP_USE_NEED_WAKEUP);
 }
@@ -363,6 +431,7 @@ static int xdp_open_skb(ec_transport_t *transport, const char *interface)
  */
 static int xdp_open_native(ec_transport_t *transport, const char *interface)
 {
+    xdp_lib_log_to_master();
     return xdp_open(transport, interface, XDP_FLAGS_DRV_MODE,
                     XDP_COPY | XDP_USE_NEED_WAKEUP);
 }

@@ -30,6 +30,8 @@
 #include <stdio.h>
 
 #include "ectp.h"
+/* after the network headers: pal.h pulls linux/if.h */
+#include "pal.h"
 
 /****************************************************************************/
 
@@ -81,7 +83,7 @@ ec_transport_t *ec_transport_create(ec_transport_type_t type,
     }
 
     if (!ops) {
-        fprintf(stderr, "Transport type %d not available\n", (int)type);
+        EC_ERR("Transport type %d not available\n", (int)type);
         return NULL;
     }
 
@@ -98,7 +100,7 @@ ec_transport_t *ec_transport_create(ec_transport_type_t type,
      * IFNAMSIZ; PCI BDFs for the CCAT transport fit as well). */
     if (interface) {
         if (strlen(interface) >= sizeof(transport->interface)) {
-            fprintf(stderr, "Transport interface name too long: %s"
+            EC_ERR("Transport interface name too long: %s"
                     " (maximum %zu characters)\n", interface,
                     sizeof(transport->interface) - 1);
             free(transport);
@@ -396,7 +398,7 @@ ec_transport_t *ec_transport_create_by_name(const char *name,
 
     type = ec_transport_find_by_name(name);
     if (type < 0) {
-        fprintf(stderr, "Unknown transport name: %s\n", name ? name : "(null)");
+        EC_ERR("Unknown transport name: %s\n", name ? name : "(null)");
         return NULL;
     }
 

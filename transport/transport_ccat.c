@@ -45,6 +45,8 @@
 #include <sys/stat.h>
 
 #include "ectp.h"
+/* after the network headers: pal.h pulls linux/if.h */
+#include "pal.h"
 
 /****************************************************************************/
 
@@ -221,7 +223,7 @@ static int ccat_verify_device(const char *bdf)
     ret = fscanf(f, "%x", &val);
     fclose(f);
     if (ret != 1 || val != CCAT_PCI_VENDOR_ID) {
-        fprintf(stderr, "CCAT: %s vendor 0x%04x != expected 0x%04x\n",
+        EC_ERR("CCAT: %s vendor 0x%04x != expected 0x%04x\n",
                 bdf, val, CCAT_PCI_VENDOR_ID);
         return -ENODEV;
     }
@@ -238,7 +240,7 @@ static int ccat_verify_device(const char *bdf)
     ret = fscanf(f, "%x", &val);
     fclose(f);
     if (ret != 1 || val != CCAT_PCI_DEVICE_ID) {
-        fprintf(stderr, "CCAT: %s device 0x%04x != expected 0x%04x\n",
+        EC_ERR("CCAT: %s device 0x%04x != expected 0x%04x\n",
                 bdf, val, CCAT_PCI_DEVICE_ID);
         return -ENODEV;
     }
@@ -268,7 +270,7 @@ static int ccat_find_eim_function(void *bar0,
         }
     }
 
-    fprintf(stderr, "CCAT: no EIM function block found (%u blocks scanned)\n",
+    EC_ERR("CCAT: no EIM function block found (%u blocks scanned)\n",
             num_func);
     return -ENOENT;
 }
@@ -291,13 +293,13 @@ static int ccat_open(ec_transport_t *transport, const char *interface)
     int ret;
 
     if (!interface || !interface[0]) {
-        fprintf(stderr, "CCAT: PCI BDF address required (e.g. \"0000:01:00.0\")\n");
+        EC_ERR("CCAT: PCI BDF address required (e.g. \"0000:01:00.0\")\n");
         return -EINVAL;
     }
 
     /* Validate BDF format (basic check) */
     if (strlen(interface) < 7 || strlen(interface) > 15) {
-        fprintf(stderr, "CCAT: invalid PCI BDF address: %s\n", interface);
+        EC_ERR("CCAT: invalid PCI BDF address: %s\n", interface);
         return -EINVAL;
     }
 
@@ -317,7 +319,7 @@ static int ccat_open(ec_transport_t *transport, const char *interface)
     /* Get BAR 0 size */
     bar0_size = ccat_get_bar0_size(interface);
     if (bar0_size <= 0) {
-        fprintf(stderr, "CCAT: failed to determine BAR 0 size for %s\n",
+        EC_ERR("CCAT: failed to determine BAR 0 size for %s\n",
                 interface);
         ret = (bar0_size < 0) ? (int)bar0_size : -EIO;
         goto err_free;
@@ -335,7 +337,7 @@ static int ccat_open(ec_transport_t *transport, const char *interface)
     ccat->bar0_fd = open(path, O_RDWR | O_SYNC | O_CLOEXEC);
     if (ccat->bar0_fd < 0) {
         ret = -errno;
-        fprintf(stderr, "CCAT: failed to open %s: %s\n",
+        EC_ERR("CCAT: failed to open %s: %s\n",
                 path, strerror(errno));
         goto err_free;
     }
@@ -344,7 +346,7 @@ static int ccat_open(ec_transport_t *transport, const char *interface)
                        MAP_SHARED, ccat->bar0_fd, 0);
     if (ccat->bar0 == MAP_FAILED) {
         ret = -errno;
-        fprintf(stderr, "CCAT: failed to mmap BAR 0: %s\n", strerror(errno));
+        EC_ERR("CCAT: failed to mmap BAR 0: %s\n", strerror(errno));
         ccat->bar0 = NULL;
         goto err_close;
     }
@@ -395,7 +397,7 @@ static int ccat_open(ec_transport_t *transport, const char *interface)
         }
     }
 
-    fprintf(stderr, "CCAT: opened %s (BAR0 %zu bytes, EIM mode, "
+    EC_INFO("CCAT: opened %s (BAR0 %zu bytes, EIM mode, "
             "MAC %02x:%02x:%02x:%02x:%02x:%02x)\n",
             interface, ccat->bar0_size,
             ccat->mac_addr[0], ccat->mac_addr[1], ccat->mac_addr[2],

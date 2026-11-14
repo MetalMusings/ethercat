@@ -38,6 +38,8 @@
 #include <arpa/inet.h>
 
 #include "ectp.h"
+/* after the network headers: pal.h pulls linux/if.h */
+#include "pal.h"
 #include "irq_pin.h"
 
 /****************************************************************************/
@@ -77,7 +79,7 @@ static int raw_open(ec_transport_t *transport, const char *interface)
             htons(EC_TRANSPORT_ETHERTYPE));
     if (raw->socket_fd < 0) {
         ret = -errno;
-        fprintf(stderr, "Failed to create raw socket: %s\n", strerror(errno));
+        EC_ERR("raw: Failed to create raw socket: %s\n", strerror(errno));
         goto err_free;
     }
 
@@ -87,7 +89,7 @@ static int raw_open(ec_transport_t *transport, const char *interface)
     ifr.ifr_name[IFNAMSIZ - 1] = '\0';
     if (ioctl(raw->socket_fd, SIOCGIFINDEX, &ifr) < 0) {
         ret = -errno;
-        fprintf(stderr, "Failed to get interface index for %s: %s\n",
+        EC_ERR("raw: Failed to get interface index for %s: %s\n",
                 interface, strerror(errno));
         goto err_close;
     }
@@ -99,7 +101,7 @@ static int raw_open(ec_transport_t *transport, const char *interface)
     ifr.ifr_name[IFNAMSIZ - 1] = '\0';
     if (ioctl(raw->socket_fd, SIOCGIFHWADDR, &ifr) < 0) {
         ret = -errno;
-        fprintf(stderr, "Failed to get MAC address for %s: %s\n",
+        EC_ERR("raw: Failed to get MAC address for %s: %s\n",
                 interface, strerror(errno));
         goto err_close;
     }
@@ -117,7 +119,7 @@ static int raw_open(ec_transport_t *transport, const char *interface)
     if (bind(raw->socket_fd, (struct sockaddr *)&raw->socket_addr,
              sizeof(raw->socket_addr)) < 0) {
         ret = -errno;
-        fprintf(stderr, "Failed to bind socket to %s: %s\n",
+        EC_ERR("raw: Failed to bind socket to %s: %s\n",
                 interface, strerror(errno));
         goto err_close;
     }
