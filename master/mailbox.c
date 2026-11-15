@@ -280,9 +280,11 @@ static void ec_mbox_stash_put(
     }
 
     if (state == EC_MBOX_SLOT_FULL) {
-        EC_SLAVE_DBG(slave, 1, "Mailbox response (protocol 0x%02X)"
-                " replaces one nobody read.\n",
-                EC_READ_U8(mail + 5) & 0x0F);
+        if (ec_log_ratelimit()) {
+            EC_SLAVE_WARN(slave, "Mailbox response (protocol 0x%02X)"
+                    " lost: the next one came before it was read.\n",
+                    EC_READ_U8(slot->data + 5) & 0x0F);
+        }
     }
     memcpy(slot->data, mail, size);
     slot->size = size;
