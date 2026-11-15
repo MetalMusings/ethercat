@@ -101,6 +101,7 @@ typedef struct {
     unsigned long od_downloads; /**< Number of SDO download requests. */
     uint8_t eoe_frame[1600]; /**< EoE frame reassembly buffer. */
     size_t eoe_len; /**< Bytes assembled so far. */
+    uint8_t mbox_deaf; /**< Does not take mail (see sim_bus_mbox_deaf). */
     unsigned int sii_lost_scans; /**< Lose the replies to SII accesses during
                                    the first this many bus scans (see
                                    sim_bus_lose_sii). */
@@ -832,6 +833,12 @@ static unsigned int sim_slave_process(sim_slave_t *slave, uint8_t cmd,
         case 0x02: /* APWR */
         case 0x05: /* FPWR */
         case 0x08: /* BWR */
+            /* A receive mailbox that still holds the last mail does not
+             * take another one: no working counter. */
+            if (slave->mbox_deaf && slave->mbox_out_len
+                    && adr == slave->mbox_out_phys) {
+                return 0;
+            }
             memcpy(slave->regs + adr, data, len);
             sim_slave_write_effects(slave, adr, len);
             return 1;
@@ -1711,6 +1718,18 @@ int sim_bus_mbox_full(sim_bus_t *bus, unsigned int pos)
     full = (bus->slaves[pos].regs[0x080D] & 0x08) ? 1 : 0;
     pthread_mutex_unlock(&bus->lock);
     return full;
+}
+
+int sim_bus_mbox_deaf(sim_bus_t *bus, unsigned int pos, int deaf)
+{
+    if (pos >= bus->nslaves) {
+        return -1;
+    }
+
+    pthread_mutex_lock(&bus->lock);
+    bus->slaves[pos].mbox_deaf = deaf ? 1 : 0;
+    pthread_mutex_unlock(&bus->lock);
+    return 0;
 }
 
 int sim_bus_od_set(sim_bus_t *bus, unsigned int pos, uint16_t index,

@@ -34,10 +34,12 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "transport_sim.h"
 
+#include "config.h" /* EC_EOE: the EoE tool functions */
 #include "ecrt_tool.h"
 
 #include "test.h"
@@ -129,6 +131,18 @@ static int ifup(const char *name)
     }
     close(fd);
     return ret;
+}
+
+/** ecrt_tool_set_eoe_ip() blocks until the request is done: run it
+ * beside the cyclic loop. */
+static void *set_ip_thread(void *arg)
+{
+    struct { ec_master_t *m; ec_tool_eoe_ip_t *ip; int ret;
+        volatile int done; } *job = arg;
+
+    job->ret = ecrt_tool_set_eoe_ip(job->m, job->ip);
+    job->done = 1;
+    return NULL;
 }
 
 int main(int argc, char **argv)
@@ -273,6 +287,95 @@ int main(int argc, char **argv)
                     && rbuf[12] == (TEST_ETHERTYPE >> 8)
                     && rbuf[13] == (TEST_ETHERTYPE & 0xFF)
                     && !memcmp(rbuf + 14, "EoE-echo-test-payload", 21)) {
+                reached = 1;
+                break;
+            }
+            fromlen = sizeof(from);
+        }
+    }
+    TEST_CHECK(reached);
+
+    /* A slave that stops taking mail: every frame is given up after its
+     * tries.  More frames than the buffer pool holds must not use the
+     * pool up (they once stayed allocated), and a set IP request must
+     * come back with an error instead of being repeated without end. */
+    TEST_CHECK_EQ(0, sim_bus_mbox_deaf(bus, 0, 1));
+    {
+        ec_tool_eoe_ip_t ip;
+        ec_tool_eoe_handler_t h;
+        struct timespec t0, t1;
+        unsigned int sent = 0, guard;
+        long ms;
+
+        for (guard = 0; guard < 400000 && sent < 150; guard++) {
+            if (guard % 20 == 0) {
+                frame[20] = (uint8_t) sent; /* not the echo test's payload */
+                if (sendto(sock, frame, sizeof(frame), MSG_DONTWAIT,
+                            (struct sockaddr *) &sll, sizeof(sll))
+                        == (ssize_t) sizeof(frame)) {
+                    sent++;
+                }
+            }
+            cycle(master, domain);
+        }
+        TEST_CHECK_EQ(150, (int) sent);
+
+        /* until the queue is worked off (given up frame by frame) */
+        for (guard = 0; guard < 400000; guard++) {
+            cycle(master, domain);
+            memset(&h, 0, sizeof(h));
+            h.eoe_index = 0;
+            if (guard % 100 == 0
+                    && ecrt_tool_get_eoe_handler(master, &h) == 0
+                    && h.tx_queued_frames == 0) {
+                break;
+            }
+        }
+        TEST_CHECK_EQ(0, (int) h.tx_queued_frames);
+
+        memset(&ip, 0, sizeof(ip));
+        ip.slave_position = 0;
+        ip.ip_address_included = 1;
+        ip.ip_address = htonl(0xC0A80A15);
+        clock_gettime(CLOCK_MONOTONIC, &t0);
+        {
+            pthread_t th;
+            static struct { ec_master_t *m; ec_tool_eoe_ip_t *ip; int ret;
+                volatile int done; } job;
+            job.m = master; job.ip = &ip; job.ret = 0; job.done = 0;
+            TEST_CHECK_EQ(0, pthread_create(&th, NULL, set_ip_thread, &job));
+            for (guard = 0; guard < 2000000 && !job.done; guard++) {
+                cycle(master, domain);
+            }
+            TEST_CHECK(job.done);
+            if (job.done) {
+                pthread_join(th, NULL);
+                TEST_CHECK(job.ret != 0);
+            }
+        }
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+        ms = (t1.tv_sec - t0.tv_sec) * 1000
+            + (t1.tv_nsec - t0.tv_nsec) / 1000000;
+        TEST_CHECK(ms < 10000);
+    }
+    TEST_CHECK_EQ(0, sim_bus_mbox_deaf(bus, 0, 0));
+
+    /* The slave hears again: a frame goes through as before. */
+    memcpy(frame + 14, "EoE-echo-after-deaf--", 21);
+    TEST_CHECK_EQ((int) sizeof(frame),
+            (int) sendto(sock, frame, sizeof(frame), 0,
+                (struct sockaddr *) &sll, sizeof(sll)));
+    reached = 0;
+    for (cycles = 0; cycles < MAX_CYCLES && !reached; cycles++) {
+        struct sockaddr_ll from;
+        socklen_t fromlen = sizeof(from);
+        ssize_t n;
+
+        cycle(master, domain);
+        while ((n = recvfrom(sock, rbuf, sizeof(rbuf), MSG_DONTWAIT,
+                        (struct sockaddr *) &from, &fromlen)) > 0) {
+            if (from.sll_pkttype != PACKET_OUTGOING && n >= 35
+                    && !memcmp(rbuf + 14, "EoE-echo-after-deaf--", 21)) {
                 reached = 1;
                 break;
             }

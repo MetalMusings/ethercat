@@ -60,6 +60,22 @@
 void ec_eoe_flush(ec_eoe_t *);
 int ec_eoe_send(ec_eoe_t *);
 
+/** Gives up the frame being sent: its buffer and descriptor go back.
+ *
+ * Without this a frame the slave did not take stayed allocated for good,
+ * and the buffer pool ran dry after about a hundred of them.
+ */
+static void ec_eoe_tx_frame_drop(ec_eoe_t *eoe /**< EoE handler */)
+{
+    if (eoe->tx_frame) {
+        ec_eoe_buf_free(eoe->tx_frame->skb);
+        ec_eoe_frame_free(eoe->tx_frame);
+        eoe->tx_frame = NULL;
+    }
+}
+
+/****************************************************************************/
+
 /****************************************************************************/
 
 // state functions
@@ -670,6 +686,7 @@ void ec_eoe_state_tx_sent(ec_eoe_t *eoe /**< EoE handler */)
                     " datagram for %s after %u tries.\n",
                     ec_eoe_netdev_name(eoe->dev), EC_EOE_TRIES);
 #endif
+            ec_eoe_tx_frame_drop(eoe);
             eoe->state = ec_eoe_state_rx_start;
         }
         return;
@@ -686,6 +703,7 @@ void ec_eoe_state_tx_sent(ec_eoe_t *eoe /**< EoE handler */)
                     " for %s after %u tries.\n",
                     ec_eoe_netdev_name(eoe->dev), EC_EOE_TRIES);
 #endif
+            ec_eoe_tx_frame_drop(eoe);
             eoe->state = ec_eoe_state_rx_start;
         }
         return;
