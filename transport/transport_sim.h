@@ -144,7 +144,8 @@ int sim_bus_mbox_full(sim_bus_t *bus, unsigned int pos);
  * its own mail waits to be read (send mailbox full), as the SOES slave
  * stack does; the EoE echo of a frame then comes when the next frame
  * begins, so that it waits while that frame's later fragments arrive.
- * Returns 0 on success. */
+ * 3: every mail only at the second try, as a slave that was still busy
+ * with the mail before.  Returns 0 on success. */
 int sim_bus_mbox_deaf(sim_bus_t *bus, unsigned int pos, int deaf);
 
 /** Create or update an object-dictionary entry of slave \a pos (CoE

@@ -234,6 +234,7 @@ void ec_fsm_coe_init(
 {
     fsm->state = NULL;
     fsm->datagram = NULL;
+    fsm->not_taken_since = 0;
 }
 
 /****************************************************************************/
@@ -435,6 +436,41 @@ void ec_fsm_coe_dict_start(
 
 /****************************************************************************/
 
+/** Whether a request the slave did not take (no working counter) is to be
+ * sent again.
+ *
+ * The slave's receive mailbox still held the mail before this one. A slave
+ * with other mailbox traffic (EoE) may leave it there for some cycles: the
+ * SOES stack reads no mail while its own waits to be read. The requests of
+ * the dictionary and of the upload segments gave up at once.
+ *
+ * \return 1 to send the request again, 0 to give up or if it was taken.
+ */
+static int ec_fsm_coe_not_taken(
+        ec_fsm_coe_t *fsm, /**< Finite state machine. */
+        unsigned long timeout_ms /**< How long to go on asking. */
+        )
+{
+    ec_time_t now;
+
+    if (fsm->datagram->working_counter) {
+        fsm->not_taken_since = 0;
+        return 0;
+    }
+
+    now = ec_current_time();
+    if (!fsm->not_taken_since) {
+        fsm->not_taken_since = now ? now : 1;
+    }
+    if (ec_time_to_ms(now - fsm->not_taken_since) < timeout_ms) {
+        return 1;
+    }
+    fsm->not_taken_since = 0;
+    return 0;
+}
+
+/****************************************************************************/
+
 /** CoE state: DICT REQUEST.
  * \todo Timeout behavior
  */
@@ -456,6 +492,13 @@ void ec_fsm_coe_dict_request(
         fsm->state = ec_fsm_coe_error;
         EC_SLAVE_ERR(slave, "Failed to receive CoE dictionary"
                 " request datagram: Datagram %s.\n", ec_datagram_state_str(fsm->datagram));
+        return;
+    }
+
+    if (ec_fsm_coe_not_taken(fsm, EC_FSM_COE_DICT_TIMEOUT)) {
+        if (ec_fsm_coe_prepare_dict(fsm, datagram)) {
+            fsm->state = ec_fsm_coe_error;
+        }
         return;
     }
 
@@ -788,6 +831,13 @@ void ec_fsm_coe_dict_desc_request(
         return;
     }
 
+    if (ec_fsm_coe_not_taken(fsm, EC_FSM_COE_DICT_TIMEOUT)) {
+        if (ec_fsm_coe_dict_prepare_desc(fsm, datagram)) {
+            fsm->state = ec_fsm_coe_error;
+        }
+        return;
+    }
+
     if (fsm->datagram->working_counter != 1) {
         fsm->state = ec_fsm_coe_error;
         char _wc[32];
@@ -1063,6 +1113,13 @@ void ec_fsm_coe_dict_entry_request(
         fsm->state = ec_fsm_coe_error;
         EC_SLAVE_ERR(slave, "Failed to receive CoE SDO entry"
                 " request datagram: Datagram %s.\n", ec_datagram_state_str(fsm->datagram));
+        return;
+    }
+
+    if (ec_fsm_coe_not_taken(fsm, EC_FSM_COE_DICT_TIMEOUT)) {
+        if (ec_fsm_coe_dict_prepare_entry(fsm, datagram)) {
+            fsm->state = ec_fsm_coe_error;
+        }
         return;
     }
 
@@ -2443,6 +2500,11 @@ void ec_fsm_coe_up_seg_request(
         fsm->state = ec_fsm_coe_error;
         EC_SLAVE_ERR(slave, "Failed to receive CoE upload segment"
                 " request datagram: Datagram %s.\n", ec_datagram_state_str(fsm->datagram));
+        return;
+    }
+
+    if (ec_fsm_coe_not_taken(fsm, fsm->request->response_timeout)) {
+        ec_fsm_coe_up_prepare_segment_request(fsm, datagram);
         return;
     }
 

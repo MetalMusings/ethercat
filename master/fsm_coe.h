@@ -48,6 +48,8 @@ struct ec_fsm_coe {
     void (*state)(ec_fsm_coe_t *, ec_datagram_t *); /**< CoE state function */
     ec_datagram_t *datagram; /**< Datagram used in last step. */
     ec_time_t time_start; /**< CoE timestamp. */
+    ec_time_t not_taken_since; /**< When a request first got no working
+                                 counter (0: it has not). */
     ec_sdo_t *sdo; /**< current SDO */
     uint8_t subindex; /**< current subindex */
     ec_sdo_request_t *request; /**< SDO request */

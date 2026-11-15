@@ -67,6 +67,11 @@ int main(void)
     TEST_CHECK_EQ(0, sim_bus_od_set(bus, 0, 0x2001, 0, test_string,
                 sizeof(test_string)));
 
+    /* The slave takes every mail only at the second try (it is still busy
+     * with the one before, as a slave with EoE traffic is): the requests
+     * of the dictionary must be sent again, not given up. */
+    TEST_CHECK_EQ(0, sim_bus_mbox_deaf(bus, 0, 3));
+
     TEST_CHECK_EQ(0, ecrt_lib_init(NULL, NULL));
     master = ecrt_startup_master(0, sim_bus_transport(bus), NULL, 0, -1, -1);
     TEST_CHECK(master != NULL);

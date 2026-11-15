@@ -102,6 +102,7 @@ typedef struct {
     uint8_t eoe_frame[1600]; /**< EoE frame reassembly buffer. */
     size_t eoe_len; /**< Bytes assembled so far. */
     uint8_t mbox_deaf; /**< Does not take mail (see sim_bus_mbox_deaf). */
+    uint8_t mbox_second; /**< mbox_deaf 3: the next write is the second. */
     uint8_t eoe_late[4 + 1600]; /**< Echo held back (mbox_deaf 2). */
     uint16_t eoe_late_len; /**< Its length, 0: none. */
     unsigned int sii_lost_scans; /**< Lose the replies to SII accesses during
@@ -854,6 +855,13 @@ static unsigned int sim_slave_process(sim_slave_t *slave, uint8_t cmd,
                         || (slave->mbox_deaf == 2
                             && (slave->regs[0x080D] & 0x08)))) {
                 return 0;
+            }
+            if (slave->mbox_out_len && adr == slave->mbox_out_phys
+                    && slave->mbox_deaf == 3) {
+                slave->mbox_second = !slave->mbox_second;
+                if (slave->mbox_second) {
+                    return 0; /* not yet: the next try is taken */
+                }
             }
             memcpy(slave->regs + adr, data, len);
             sim_slave_write_effects(slave, adr, len);
