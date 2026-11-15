@@ -95,7 +95,8 @@ typedef struct {
     int if_index;                      /**< Interface index */
     uint8_t mac_addr[6];               /**< Interface MAC address */
     int ioctl_sock;                    /**< Socket for ioctl operations (link state, etc.) */
-    uint32_t xdp_flags;                /**< XDP flags used during open (needed for detach) */
+    uint32_t xdp_flags;                /**< XDP mode flags used during open */
+    int map_fd;                        /**< The program's XSKMAP (-1: none) */
     uint64_t fq_refill_pending[FQ_REFILL_MAX]; /**< Frames awaiting FQ refill */
     uint32_t fq_refill_count;          /**< Number of pending refill frames */
     ec_irq_set_t irqs;                 /**< Cached NIC IRQs (count 0 = not discovered) */
@@ -159,45 +160,209 @@ static void process_completion_queue(ec_transport_xdp_t *xdp, unsigned int max_f
 
 /****************************************************************************/
 
-/**
- * Remove an XDP program left on the interface.
+/* The master's own XDP program, kept on the interface.
  *
- * A master that is killed (kill -9, a crash of the application) leaves its
- * XDP program attached: xdp_close() never runs. The next start then fails
- * in an application without CAP_SYS_ADMIN (LinuxCNC's rtapi_app), with
- * "Permission denied" or "Device or resource busy", since libxdp cannot
- * reuse a program it may not open. The caller owns the interface (the
- * masters share a lock per interface), so a program still attached is
- * stale. Detaching needs only CAP_NET_ADMIN, as in xdp_close().
+ * Attaching or removing an XDP program restarts the network card on
+ * common drivers (igc, igb: the link goes down for 1.5-2 s while it is
+ * negotiated again; igc even when one program replaces another). So the
+ * program is attached once and left on the interface when a master
+ * closes: the next master (the free ec_master, or an application such as
+ * LinuxCNC) finds it and only binds its AF_XDP socket to it, which does
+ * not touch the link. The kernel removes a closed socket from the map,
+ * also when its process was killed.
  *
- * \return 1 if a program was removed, 0 if none was attached, negative on
- *         error.
+ * The program sends EtherCAT frames (ethertype 0x88A4) to the socket in
+ * the XSKMAP at the frame's receive queue, and everything else to the
+ * kernel (XDP_PASS), also EtherCAT frames while no socket is bound: a
+ * program left on the card without a master is harmless, and the raw
+ * transport still works with it. "sudo ip link set dev <if> xdp off"
+ * removes it.
+ *
+ * It is written as BPF instructions, so no BPF compiler is needed to
+ * build the master. Its name carries a version: change the name with the
+ * code, and a master finding an older version replaces it (one restart).
  */
-static int xdp_remove_stale_program(int if_index, const char *interface)
+#define EC_XDP_PROG_NAME "ethercat_xdp1"
+#define EC_XDP_MAP_NAME "ethercat_xsks"
+#define EC_XDP_MAP_ENTRIES 64
+
+#define EC_XDP_INSN(c, d, s, o, i) ((struct bpf_insn) { \
+    .code = (c), .dst_reg = (d), .src_reg = (s), .off = (o), .imm = (i) })
+
+/** Load the program with a new XSKMAP; returns the program fd. */
+static int xdp_load_program(int *map_fd_out)
+{
+    char log[2048] = "";
+    LIBBPF_OPTS(bpf_prog_load_opts, opts,
+            .log_buf = log, .log_size = sizeof(log), .log_level = 0);
+    int map_fd, prog_fd;
+
+    map_fd = bpf_map_create(BPF_MAP_TYPE_XSKMAP, EC_XDP_MAP_NAME,
+            sizeof(int), sizeof(int), EC_XDP_MAP_ENTRIES, NULL);
+    if (map_fd < 0) {
+        EC_ERR("XDP: cannot create the socket map: %s\n", strerror(errno));
+        return -errno;
+    }
+    {
+        const struct bpf_insn insns[] = {
+            /* r6 = ctx; r2 = data; r3 = data_end */
+            EC_XDP_INSN(BPF_ALU64 | BPF_MOV | BPF_X, 6, 1, 0, 0),
+            EC_XDP_INSN(BPF_LDX | BPF_MEM | BPF_W, 2, 1, 0, 0),
+            EC_XDP_INSN(BPF_LDX | BPF_MEM | BPF_W, 3, 1, 4, 0),
+            /* shorter than an Ethernet header: pass */
+            EC_XDP_INSN(BPF_ALU64 | BPF_MOV | BPF_X, 4, 2, 0, 0),
+            EC_XDP_INSN(BPF_ALU64 | BPF_ADD | BPF_K, 4, 0, 0, ETH_HLEN),
+            EC_XDP_INSN(BPF_JMP | BPF_JGT | BPF_X, 4, 3, 8, 0),
+            /* ethertype (network order, read as little endian) */
+            EC_XDP_INSN(BPF_LDX | BPF_MEM | BPF_H, 5, 2, 12, 0),
+            EC_XDP_INSN(BPF_JMP | BPF_JNE | BPF_K, 5, 0, 6,
+                    ((EC_TRANSPORT_ETHERTYPE & 0xff) << 8)
+                    | (EC_TRANSPORT_ETHERTYPE >> 8)),
+            /* return bpf_redirect_map(map, rx_queue_index, XDP_PASS) */
+            EC_XDP_INSN(BPF_LDX | BPF_MEM | BPF_W, 2, 6, 16, 0),
+            EC_XDP_INSN(BPF_LD | BPF_DW | BPF_IMM, 1, BPF_PSEUDO_MAP_FD, 0,
+                    map_fd),
+            EC_XDP_INSN(0, 0, 0, 0, 0),
+            EC_XDP_INSN(BPF_ALU64 | BPF_MOV | BPF_K, 3, 0, 0, XDP_PASS),
+            EC_XDP_INSN(BPF_JMP | BPF_CALL, 0, 0, 0, BPF_FUNC_redirect_map),
+            EC_XDP_INSN(BPF_JMP | BPF_EXIT, 0, 0, 0, 0),
+            /* pass: */
+            EC_XDP_INSN(BPF_ALU64 | BPF_MOV | BPF_K, 0, 0, 0, XDP_PASS),
+            EC_XDP_INSN(BPF_JMP | BPF_EXIT, 0, 0, 0, 0),
+        };
+        prog_fd = bpf_prog_load(BPF_PROG_TYPE_XDP, EC_XDP_PROG_NAME, "GPL",
+                insns, sizeof(insns) / sizeof(insns[0]), &opts);
+    }
+    if (prog_fd < 0) {
+        int err = -errno;
+        EC_ERR("XDP: cannot load the program: %s%s%s\n", strerror(-err),
+                log[0] ? "; verifier: " : "", log);
+        close(map_fd);
+        return err;
+    }
+    (void)fcntl(map_fd, F_SETFD, FD_CLOEXEC);
+    (void)fcntl(prog_fd, F_SETFD, FD_CLOEXEC);
+    *map_fd_out = map_fd;
+    return prog_fd;
+}
+
+/** Whether program \a prog_id is this master's program.
+ *
+ * \return 1 and its map's fd in \a map_fd_out if it is, 0 if not,
+ *         negative on error. */
+static int xdp_is_ours(uint32_t prog_id, int *map_fd_out)
+{
+    struct bpf_prog_info info;
+    struct bpf_map_info map_info;
+    uint32_t len = sizeof(info), map_len = sizeof(map_info), map_id = 0;
+    int prog_fd, map_fd, ret = 0;
+
+    prog_fd = bpf_prog_get_fd_by_id(prog_id);
+    if (prog_fd < 0)
+        return -errno;
+    memset(&info, 0, sizeof(info));
+    info.nr_map_ids = 1;
+    info.map_ids = (uint64_t)(unsigned long)&map_id;
+    if (bpf_prog_get_info_by_fd(prog_fd, &info, &len) == 0
+            && strcmp(info.name, EC_XDP_PROG_NAME) == 0
+            && info.nr_map_ids == 1) {
+        map_fd = bpf_map_get_fd_by_id(map_id);
+        memset(&map_info, 0, sizeof(map_info));
+        if (map_fd >= 0 && bpf_map_get_info_by_fd(map_fd, &map_info,
+                    &map_len) == 0
+                && map_info.type == BPF_MAP_TYPE_XSKMAP) {
+            (void)fcntl(map_fd, F_SETFD, FD_CLOEXEC);
+            *map_fd_out = map_fd;
+            ret = 1;
+        } else if (map_fd >= 0) {
+            close(map_fd);
+        }
+    }
+    close(prog_fd);
+    return ret;
+}
+
+/** Remove every XDP program from the interface (each a link restart). */
+static void xdp_detach_all(int if_index, const char *interface,
+        const struct bpf_xdp_query_opts *opts)
+{
+    int failed = 0;
+
+    if (opts->skb_prog_id
+            && bpf_xdp_detach(if_index, XDP_FLAGS_SKB_MODE, NULL) < 0)
+        failed = 1;
+    if (opts->drv_prog_id
+            && bpf_xdp_detach(if_index, XDP_FLAGS_DRV_MODE, NULL) < 0)
+        failed = 1;
+    if (opts->hw_prog_id
+            && bpf_xdp_detach(if_index, XDP_FLAGS_HW_MODE, NULL) < 0)
+        failed = 1;
+    if (failed)
+        EC_ERR("XDP: could not remove the program on %s; try: sudo ip link"
+                " set dev %s xdp off\n", interface, interface);
+}
+
+/**
+ * Find this master's program on the interface in the wanted mode, or put
+ * it there.
+ *
+ * The caller owns the interface (the masters share a lock per
+ * interface). The program found in the wanted mode is used as it is.
+ * Anything else is removed first: another program (libxdp's from an
+ * older master, someone else's) or this program in the other mode
+ * (the transport changed between xdp-skb and xdp-native).
+ *
+ * \return 0 with xdp->map_fd set, or a negative error code.
+ */
+static int xdp_prepare_program(ec_transport_xdp_t *xdp,
+        const char *interface)
 {
     LIBBPF_OPTS(bpf_xdp_query_opts, opts);
-    int ret, removed = 0;
+    uint32_t want_id, other_id;
+    int prog_fd, map_fd = -1, ret;
 
-    ret = bpf_xdp_query(if_index, 0, &opts);
-    if (ret < 0)
+    ret = bpf_xdp_query(xdp->if_index, 0, &opts);
+    if (ret < 0) {
+        EC_ERR("XDP: cannot query %s: %s\n", interface, strerror(-ret));
         return ret;
-    if (opts.attach_mode == XDP_ATTACHED_NONE)
+    }
+    if (xdp->xdp_flags & XDP_FLAGS_DRV_MODE) {
+        want_id = opts.drv_prog_id;
+        other_id = opts.skb_prog_id | opts.hw_prog_id;
+    } else {
+        want_id = opts.skb_prog_id;
+        other_id = opts.drv_prog_id | opts.hw_prog_id;
+    }
+
+    if (want_id && !other_id && xdp_is_ours(want_id, &map_fd) == 1) {
+        EC_INFO("XDP: using the program already on %s (no link"
+                " restart)\n", interface);
+        xdp->map_fd = map_fd;
         return 0;
-    EC_WARN("An XDP program is left on %s (by a master that did not"
-            " stop); removing it\n", interface);
-    if (opts.skb_prog_id
-            && bpf_xdp_detach(if_index, XDP_FLAGS_SKB_MODE, NULL) == 0)
-        removed = 1;
-    if (opts.drv_prog_id
-            && bpf_xdp_detach(if_index, XDP_FLAGS_DRV_MODE, NULL) == 0)
-        removed = 1;
-    if (opts.hw_prog_id
-            && bpf_xdp_detach(if_index, XDP_FLAGS_HW_MODE, NULL) == 0)
-        removed = 1;
-    if (!removed)
-        EC_ERR("Could not remove it; try: sudo ip link set dev %s"
-                " xdp off\n", interface);
-    return removed;
+    }
+
+    if (opts.attach_mode != XDP_ATTACHED_NONE) {
+        EC_WARN("XDP: replacing the program on %s (the link restarts)\n",
+                interface);
+        xdp_detach_all(xdp->if_index, interface, &opts);
+    }
+
+    prog_fd = xdp_load_program(&map_fd);
+    if (prog_fd < 0)
+        return prog_fd;
+    ret = bpf_xdp_attach(xdp->if_index, prog_fd, xdp->xdp_flags, NULL);
+    close(prog_fd);  /* the interface holds the program now */
+    if (ret < 0) {
+        EC_ERR("XDP: cannot attach the program to %s: %s\n", interface,
+                strerror(-ret));
+        close(map_fd);
+        return ret;
+    }
+    EC_INFO("XDP: program attached to %s; it stays there for the next"
+            " master (sudo ip link set dev %s xdp off removes it)\n",
+            interface, interface);
+    xdp->map_fd = map_fd;
+    return 0;
 }
 
 /****************************************************************************/
@@ -211,10 +376,11 @@ static int xdp_remove_stale_program(int if_index, const char *interface)
 
 /* What libbpf and libxdp say on every start on a working system: the ELF
  * sections libbpf does not know (libxdp's metadata) and libxdp's fallback
- * to a single program when no bpffs is mounted. And what libxdp says on
- * every close by an application that has dropped its privileges (LinuxCNC):
- * it cannot update its refcount and asks to detach the program, which
- * xdp_close() then does, and checks. Not logged. */
+ * to a single program when no bpffs is mounted. And what libxdp said on
+ * every close by an application that has dropped its privileges (LinuxCNC)
+ * while libxdp managed the program; the transport attaches its own now
+ * (xdp_prepare_program()), but an older libxdp may still say it. Not
+ * logged. */
 static const char *const xdp_lib_quiet[] = {
     "skipping unrecognized data section",
     "Can't use dispatcher without a working bpffs",
@@ -291,6 +457,7 @@ static int xdp_open(ec_transport_t *transport, const char *interface,
     }
 
     xdp->ioctl_sock = -1;
+    xdp->map_fd = -1;
     xdp->xdp_flags = xdp_flags;
     transport->priv = xdp;
 
@@ -365,19 +532,37 @@ static int xdp_open(ec_transport_t *transport, const char *interface,
     cfg.tx_size = XDP_TX_RING_SIZE;
     cfg.xdp_flags = xdp_flags;
     cfg.bind_flags = bind_flags;
-    cfg.libbpf_flags = 0;
+    /* The program is this transport's own (xdp_prepare_program()), not
+     * libxdp's: libxdp would attach and detach one per socket. */
+    cfg.libbpf_flags = XSK_LIBBPF_FLAGS__INHIBIT_PROG_LOAD;
 
-    /* A program left by a master that did not stop makes the creation
-     * fail, and a failed attempt leaves libxdp unable to try again: remove
-     * it first. */
-    xdp_remove_stale_program(xdp->if_index, interface);
+    ret = xdp_prepare_program(xdp, interface);
+    if (ret) {
+        goto err_free_umem;
+    }
 
-    /* Create XSK socket (queue 0) */
-    ret = xsk_socket__create(&xdp->xsk, interface, 0, xdp->umem,
-                            &xdp->rx, &xdp->tx, &cfg);
+    /* Create XSK socket (queue 0). The kernel frees the queue of a socket
+     * that was just closed (the previous master's) a little later, and
+     * until then the bind fails with EBUSY: try again for up to 2 s. */
+    for (i = 0; ; i++) {
+        ret = xsk_socket__create(&xdp->xsk, interface, 0, xdp->umem,
+                                &xdp->rx, &xdp->tx, &cfg);
+        if (ret != -EBUSY || i >= 200) {
+            break;
+        }
+        usleep(10000);
+    }
     if (ret) {
         EC_ERR("XDP: Failed to create XSK socket: %s\n", strerror(-ret));
         goto err_free_umem;
+    }
+
+    /* Bind the socket to the program: frames on queue 0 come here. */
+    ret = xsk_socket__update_xskmap(xdp->xsk, xdp->map_fd);
+    if (ret) {
+        EC_ERR("XDP: cannot add the socket to the program's map: %s\n",
+                strerror(-ret));
+        goto err_free_socket;
     }
 
     /* libxdp creates its fds without CLOEXEC. A forked child (a [FILTER]
@@ -412,6 +597,9 @@ err_free_umem:
 err_free_buffer:
     ec_rt_free(xdp->umem_buffer, NUM_FRAMES * FRAME_SIZE);
 err_free:
+    if (xdp->map_fd >= 0) {
+        close(xdp->map_fd);
+    }
     if (xdp->ioctl_sock >= 0) {
         close(xdp->ioctl_sock);
     }
@@ -450,28 +638,17 @@ static void xdp_close(ec_transport_t *transport)
     ec_transport_xdp_t *xdp = transport->priv;
 
     if (xdp) {
+        /* Closing the socket takes it out of the program's map. The
+         * program stays on the interface for the next master: removing
+         * it would restart the link (see EC_XDP_PROG_NAME). Nothing here
+         * needs a privilege, so an application that has dropped its
+         * privileges closes the same way. */
         if (xdp->xsk) {
-            /* Let libxdp try its own cleanup first */
             xsk_socket__delete(xdp->xsk);
             xdp->xsk = NULL;
         }
-
-        /* Safety net: forcibly detach XDP program if libxdp's cleanup
-         * failed (e.g. due to dropped privileges). This is what ensures
-         * the next start won't get "Permission denied". libxdp's own
-         * message about it is not logged (xdp_lib_quiet): say it here
-         * only if a program is still attached. */
-        if (xdp->if_index > 0) {
-            LIBBPF_OPTS(bpf_xdp_query_opts, opts);
-
-            bpf_xdp_detach(xdp->if_index, xdp->xdp_flags, NULL);
-            if (bpf_xdp_query(xdp->if_index, 0, &opts) == 0
-                    && opts.attach_mode != XDP_ATTACHED_NONE) {
-                EC_WARN("XDP: a program is still attached to %s; the next"
-                        " master removes it, or: sudo ip link set dev %s"
-                        " xdp off\n", transport->interface,
-                        transport->interface);
-            }
+        if (xdp->map_fd >= 0) {
+            close(xdp->map_fd);
         }
 
         if (xdp->umem) {
@@ -693,12 +870,13 @@ static int xdp_receive(ec_transport_t *transport, uint8_t *buffer, size_t max_si
         len = xsk_ring_cons__rx_desc(&xdp->rx, idx_rx)->len;
         frame = xsk_umem__get_data(xdp->umem_buffer, addr);
 
-        /* The default XSK program redirects ALL traffic on the queue, so
-         * anything the kernel stack emits on this interface (IPv6 ND/MLD,
-         * LLDP, ...) travels around the slave ring and comes back here.
-         * Passing a non-EtherCAT frame up would be miscounted as a
-         * corrupted frame by the master, so filter on the ethertype like
-         * the raw transport's protocol-bound socket does. */
+        /* The program redirects only EtherCAT frames, but a program
+         * attached by something else (or libxdp's default one, which
+         * redirects ALL traffic on the queue) would bring whatever the
+         * kernel stack emits here (IPv6 ND/MLD, LLDP, ...). Passing a
+         * non-EtherCAT frame up would be miscounted as a corrupted frame
+         * by the master, so filter on the ethertype like the raw
+         * transport's protocol-bound socket does. */
         if (len < ETH_HLEN
                 || ((frame[12] << 8) | frame[13]) != EC_TRANSPORT_ETHERTYPE) {
             xdp->rx_foreign++;

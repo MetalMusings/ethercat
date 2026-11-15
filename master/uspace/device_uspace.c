@@ -175,7 +175,10 @@ int ec_device_open(ec_device_t *device)
     /* Transport is already opened in module, just set state */
     device->open = 1;
     device->link_state = 0;
-    device->pal.last_link_check = ec_current_time();
+    /* Check the link at the first chance, not 1 s from now: it is usually
+     * up already (the XDP transport keeps its program on the card, so
+     * opening does not restart the link), and the bus scan waits for it. */
+    device->pal.last_link_check = 0;
     ec_device_clear_stats(device);
     
     /* Initialize Ethernet header in TX buffer */

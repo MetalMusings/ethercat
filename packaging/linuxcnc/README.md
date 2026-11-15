@@ -54,6 +54,18 @@ sudo ethercat-uspace stop
 (`-t xdp-native`) gives shorter and more even cycle times, but needs a
 driver with XDP support, such as `igc` (Intel i225/i226) or `igb`.
 
+With `xdp-skb` or `xdp-native` the master attaches a small XDP program to
+the card the first time, and leaves it there when it stops: attaching or
+removing it restarts the network card (the link is down for about 2 s on
+`igc` and `igb`), so the next master, the free one or LinuxCNC's, only
+binds to it and finds the slaves at once. The program sends EtherCAT frames
+to a running master and everything else to the system as usual; without a
+master it passes all frames on. A reboot removes it, and so does:
+
+```
+sudo ip link set dev enp2s0 xdp off
+```
+
 LinuxCNC with `ecat` stops a free-running master on the same interface
 when it starts.
 

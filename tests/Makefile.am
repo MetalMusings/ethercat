@@ -61,6 +61,11 @@ check_PROGRAMS = \
 	test_sim_transport_file \
 	test_tool_ipc
 
+# Needs root (BPF programs): skips (77) without it.
+if HAVE_XDP
+check_PROGRAMS += test_xdp_keep
+endif
+
 TESTS = $(check_PROGRAMS)
 
 # Link the libtool library statically so tests can reach internal
@@ -98,6 +103,7 @@ test_sim_scan_stale_mbox_SOURCES = test_sim_scan_stale_mbox.c test.h
 test_sim_sdo_info_SOURCES = test_sim_sdo_info.c test.h
 test_sim_transport_file_SOURCES = test_sim_transport_file.c test.h
 test_tool_ipc_SOURCES = test_tool_ipc.c test.h
+test_xdp_keep_SOURCES = test_xdp_keep.c test.h
 
 # test_tool_ipc runs the real ethercat binary against the IPC socket
 # (skips itself if the tool was not built).

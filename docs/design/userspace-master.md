@@ -333,6 +333,38 @@ libbpf does not know, libxdp's fallback to a single program without a
 mounted bpffs). Only the list of transport names that the tool prints
 stays on stderr.
 
+### The XDP program stays on the card
+
+The AF_XDP transports attach their own XDP program
+(`transport/transport_xdp.c`, `EC_XDP_PROG_NAME`) instead of libxdp's, and
+do not remove it when they close. Attaching or removing an XDP program
+restarts the card on common drivers (`igc`, `igb`: link down 1.5-2 s;
+`igc` also when one program replaces another), which every master start
+and every handover between the free `ec_master` and an application used
+to cost. Measured on an `igc` with four slaves: free master start to the
+end of the bus scan 3.45 s before, 0.37 s with the program kept (with the
+first link check made at once, `ec_device_open()`, instead of 1 s later).
+
+- The program is written as BPF instructions (no BPF compiler in the
+  build). It redirects ethertype 0x88A4 to the XSKMAP entry of the
+  receive queue, with `XDP_PASS` as the default: other traffic reaches the
+  kernel, and with no socket bound EtherCAT frames do too, so a program
+  left without a master is harmless and the raw transport works with it.
+- Open: the program in the wanted mode whose name is `EC_XDP_PROG_NAME`
+  and whose one map is an XSKMAP is reused; anything else (libxdp's
+  program from an older master, another program, ours in the other mode)
+  is removed and ours attached (one restart). The socket is created with
+  `XSK_LIBBPF_FLAGS__INHIBIT_PROG_LOAD` and put in the map. A bind right
+  after the previous master closed may fail with `EBUSY` until the kernel
+  has released that socket's queue: it is retried for up to 2 s.
+- Close: the socket only. The kernel takes a closed socket out of the
+  map, also when its process was killed. Nothing in close needs a
+  privilege.
+- Change the program's name with its code (`ethercat_xdp1` -> `...2`):
+  a master finding an older version replaces it.
+- `tests/test_xdp_keep.c` checks this on a veth pair in a private network
+  namespace (root only; skips otherwise).
+
 ## Build System
 
 ### Configure Option
