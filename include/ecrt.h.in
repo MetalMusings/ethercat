@@ -273,6 +273,11 @@
  */
 #define EC_HAVE_SET_IP
 
+/** Defined, if the method ecrt_slave_config_eoe_host_address() is available
+ * (userspace master only).
+ */
+#define EC_HAVE_EOE_HOST_ADDRESS
+
 /** Defined, if the method ecrt_slave_config_state_timeout() is available.
  */
 #define EC_HAVE_STATE_TIMEOUT
@@ -2354,6 +2359,34 @@ EC_PUBLIC_API int ecrt_slave_config_eoe_dns_address(
 EC_PUBLIC_API int ecrt_slave_config_eoe_hostname(
         ec_slave_config_t *sc, /**< Slave configuration. */
         const char *name /**< Zero-terminated host name. */
+        );
+
+/** Sets this computer's own address on the slave's Ethernet-over-EtherCAT
+ * (EoE) network device (userspace master).
+ *
+ * The master creates one network device per EoE slave (eoe<MASTER>s<POSITION>,
+ * a TAP device), and creates it anew at every bus scan. Without an address
+ * of its own on that device, the computer cannot talk to the slave. With
+ * this method the master sets the address and the subnet mask and brings
+ * the device up: each time the slave is configured and after each rescan,
+ * so the address survives a rescan in operation.
+ *
+ * The address must be in the slave's subnet (see
+ * ecrt_slave_config_eoe_ip_address() and ecrt_slave_config_eoe_subnet_mask())
+ * and must not be the slave's own. Routes and bridges are not touched.
+ *
+ * This method has to be called in non-realtime context before
+ * ecrt_master_activate().
+ *
+ * \apiusage{master_idle,blocking}
+ *
+ * \retval  0 Success.
+ * \retval <0 Error code.
+ */
+EC_PUBLIC_API int ecrt_slave_config_eoe_host_address(
+        ec_slave_config_t *sc, /**< Slave configuration. */
+        struct in_addr host_address, /**< This computer's IPv4 address. */
+        struct in_addr subnet_mask /**< IPv4 subnet mask. */
         );
 
 /** Sets the application-layer state transition timeout in ms.

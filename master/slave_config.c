@@ -111,6 +111,9 @@ void ec_slave_config_init(
 
 #ifdef EC_EOE
     ec_eoe_request_init(&sc->eoe_ip_param_request);
+    sc->eoe_host_address.s_addr = 0;
+    sc->eoe_host_mask.s_addr = 0;
+    sc->eoe_host_address_included = 0;
 #endif
 
     ec_coe_emerg_ring_init(&sc->emerg_ring, sc);
@@ -1545,6 +1548,26 @@ int ecrt_slave_config_eoe_hostname(ec_slave_config_t *sc,
 {
     strncpy(sc->eoe_ip_param_request.name, name, EC_MAX_HOSTNAME_SIZE - 1);
     sc->eoe_ip_param_request.name_included = 1;
+    return 0;
+}
+
+/****************************************************************************/
+
+int ecrt_slave_config_eoe_host_address(ec_slave_config_t *sc,
+        struct in_addr host_address, struct in_addr subnet_mask)
+{
+    uint32_t m = ntohl(subnet_mask.s_addr);
+
+    if (!host_address.s_addr || !m || (~m & (~m + 1)) != 0) {
+        EC_CONFIG_ERR(sc, "Invalid EoE host address or subnet mask.\n");
+        return -EINVAL;
+    }
+
+    // Read by the master's thread when it configures the slave and after
+    // a rescan; set before activation, as the other EoE parameters.
+    sc->eoe_host_address = host_address;
+    sc->eoe_host_mask = subnet_mask;
+    sc->eoe_host_address_included = 1;
     return 0;
 }
 

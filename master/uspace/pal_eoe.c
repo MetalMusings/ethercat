@@ -170,6 +170,53 @@ int ec_netdev_set_mac(ec_netdev_t *dev, const uint8_t mac[ETH_ALEN])
     return ret;
 }
 
+int ec_eoe_netdev_set_host(ec_eoe_netdev_t dev, struct in_addr address,
+        struct in_addr mask)
+{
+    struct ifreq ifr;
+    struct sockaddr_in *sin = (struct sockaddr_in *) &ifr.ifr_addr;
+    int sock, ret = 0;
+
+    if (!dev || dev->fd < 0) {
+        return -EINVAL;
+    }
+
+    sock = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+    if (sock < 0) {
+        return -errno;
+    }
+
+    memset(&ifr, 0, sizeof(ifr));
+    snprintf(ifr.ifr_name, IFNAMSIZ, "%s", dev->name);
+    sin->sin_family = AF_INET;
+    sin->sin_addr = address;
+    if (ioctl(sock, SIOCSIFADDR, &ifr) < 0) {
+        ret = -errno;
+        goto out;
+    }
+
+    sin->sin_addr = mask;
+    if (ioctl(sock, SIOCSIFNETMASK, &ifr) < 0) {
+        ret = -errno;
+        goto out;
+    }
+
+    if (ioctl(sock, SIOCGIFFLAGS, &ifr) < 0) {
+        ret = -errno;
+        goto out;
+    }
+    if (!(ifr.ifr_flags & IFF_UP)) {
+        ifr.ifr_flags |= IFF_UP;
+        if (ioctl(sock, SIOCSIFFLAGS, &ifr) < 0) {
+            ret = -errno;
+        }
+    }
+
+out:
+    close(sock);
+    return ret;
+}
+
 /****************************************************************************/
 /* Socket Buffer Implementation                                             */
 /*                                                                          */

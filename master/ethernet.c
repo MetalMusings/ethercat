@@ -32,6 +32,7 @@
 #include "master_globals.h"
 #include "master.h"
 #include "slave.h"
+#include "slave_config.h"
 #include "mailbox.h"
 #include "ethernet.h"
 
@@ -146,6 +147,51 @@ int ec_eoe_init(
     }
 
     return 0;
+}
+
+/****************************************************************************/
+
+/** Sets the host's address on a slave's EoE network device, if the slave's
+ * configuration has one (ecrt_slave_config_eoe_host_address()).
+ *
+ * The device is created anew at every scan, so this is called when the
+ * slave is configured and when configurations are attached after a scan.
+ * Master thread only: it walks the list of EoE handlers.
+ */
+void ec_eoe_host_address(ec_slave_t *slave /**< EtherCAT slave */)
+{
+    ec_slave_config_t *sc = slave->config;
+    const uint8_t *a, *m;
+    ec_eoe_t *eoe;
+    int ret;
+
+    if (!sc || !sc->eoe_host_address_included) {
+        return;
+    }
+
+    a = (const uint8_t *) &sc->eoe_host_address.s_addr; // network order
+    m = (const uint8_t *) &sc->eoe_host_mask.s_addr;
+
+    list_for_each_entry(eoe, &slave->master->eoe_handlers, list) {
+        if (eoe->slave != slave) {
+            continue;
+        }
+        ret = ec_eoe_netdev_set_host(eoe->dev, sc->eoe_host_address,
+                sc->eoe_host_mask);
+        if (ret) {
+            EC_SLAVE_WARN(slave, "Failed to set the host address"
+                    " %u.%u.%u.%u on %s: error %i\n", a[0], a[1], a[2], a[3],
+                    ec_eoe_netdev_name(eoe->dev), ret);
+        } else {
+            EC_SLAVE_INFO(slave, "%s: host address %u.%u.%u.%u,"
+                    " mask %u.%u.%u.%u\n", ec_eoe_netdev_name(eoe->dev),
+                    a[0], a[1], a[2], a[3], m[0], m[1], m[2], m[3]);
+        }
+        return;
+    }
+
+    EC_SLAVE_WARN(slave, "A host address is configured, but the slave has"
+            " no EoE network device.\n");
 }
 
 /****************************************************************************/

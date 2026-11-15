@@ -548,6 +548,27 @@ datagram back first: out of the external queue, and in cyclic mode it waits
 `tests/test_sim_eoe_cyclic.c` (multi-fragment frames, no frames between
 cycles, process data complete, link loss with EoE datagrams in flight).
 
+### The Host's Address on an EoE Device
+
+The TAP device of an EoE slave (`eoe<master>s<position>`) is created at the
+bus scan and anew at every rescan and every handover between the free
+master and an application, so an address given to it with `ip addr` is
+gone again. `ecrt_slave_config_eoe_host_address()` puts the computer's own
+address and subnet mask into the slave's configuration; the master's
+thread then sets them on the device and brings it up
+(`ec_eoe_host_address()`):
+
+- when it configures the slave (before the slave's own IP parameters are
+  sent), and
+- when the configurations are attached at the end of a scan, for a slave
+  that stays in OP through a rescan and is not configured again.
+
+Routes and bridges are not touched; the connected route of the subnet comes
+with the address. The free master has no configurations and sets nothing.
+Tested by `tests/test_sim_eoe_host.c` (no address without the call, the
+address after configuration and again after a link loss, before the slave
+is back in PREOP).
+
 Fixed on the way: the EoE sender cut frames into fragments by the slave's
 *send* mailbox size while writing them into its *receive* mailbox; slaves
 with mailboxes of different sizes got "Send error" for every larger frame.

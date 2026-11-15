@@ -145,6 +145,10 @@ struct ec_slave_config {
 
 #ifdef EC_EOE
     ec_eoe_request_t eoe_ip_param_request; /**< EoE IP parameters. */
+    struct in_addr eoe_host_address; /**< The host's address on the EoE
+                                       network device. */
+    struct in_addr eoe_host_mask; /**< Its subnet mask. */
+    uint8_t eoe_host_address_included; /**< The two above are set. */
 #endif
 
     ec_coe_emerg_ring_t emerg_ring; /**< CoE emergency ring buffer. */

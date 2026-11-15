@@ -17,6 +17,14 @@ static inline int ec_eoe_netdev_ifindex(ec_eoe_netdev_t dev) {
 struct ec_eoe;
 
 /* Net_device lifecycle */
+/* The kernel master leaves the device's address to the system's network
+ * configuration. */
+static inline int ec_eoe_netdev_set_host(ec_eoe_netdev_t dev,
+        struct in_addr address, struct in_addr mask) {
+    (void) dev; (void) address; (void) mask;
+    return -EOPNOTSUPP;
+}
+
 int ec_eoe_netdev_create(struct ec_eoe *eoe, const char *name);
 void ec_eoe_netdev_destroy(struct ec_eoe *eoe);
 

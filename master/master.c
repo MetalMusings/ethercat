@@ -1737,6 +1737,12 @@ void ec_master_attach_slave_configs(
 
     list_for_each_entry(sc, &master->configs, list) {
         ec_slave_config_attach(sc);
+#ifdef EC_EOE
+        // the scan made the EoE network device anew, without an address
+        if (sc->slave) {
+            ec_eoe_host_address(sc->slave);
+        }
+#endif
     }
 }
 

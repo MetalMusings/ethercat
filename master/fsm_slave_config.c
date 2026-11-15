@@ -1009,6 +1009,8 @@ void ec_fsm_slave_config_enter_eoe_ip_param(
     ec_slave_t *slave = fsm->slave;
     ec_eoe_request_t *request = &slave->config->eoe_ip_param_request;
 
+    ec_eoe_host_address(slave);
+
     if (ec_eoe_request_valid(request)) {
         EC_SLAVE_DBG(slave, 1, "Setting EoE IP parameters...\n");
 

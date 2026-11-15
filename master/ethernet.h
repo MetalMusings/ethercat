@@ -111,6 +111,7 @@ struct ec_eoe
 
 int ec_eoe_init(ec_eoe_t *, ec_slave_t *);
 void ec_eoe_clear(ec_eoe_t *);
+void ec_eoe_host_address(ec_slave_t *);
 void ec_eoe_flush(ec_eoe_t *);
 void ec_eoe_run(ec_eoe_t *);
 void ec_eoe_queue(ec_eoe_t *);

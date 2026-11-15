@@ -231,6 +231,12 @@ struct ec_eoe;
 
 /* Net_device lifecycle */
 int ec_eoe_netdev_create(struct ec_eoe *eoe, const char *name);
+
+/** Give the device this computer's address and subnet mask and bring it up.
+ * @return 0 on success, negative error code on failure
+ */
+int ec_eoe_netdev_set_host(ec_eoe_netdev_t dev, struct in_addr address,
+        struct in_addr mask);
 void ec_eoe_netdev_destroy(struct ec_eoe *eoe);
 
 /* TX polling (userspace pull model) */

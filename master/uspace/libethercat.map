@@ -83,6 +83,7 @@ ecrt_slave_config_emerg_pop;
 ecrt_slave_config_emerg_size;
 ecrt_slave_config_eoe_dns_address;
 ecrt_slave_config_eoe_default_gateway;
+ecrt_slave_config_eoe_host_address;
 ecrt_slave_config_eoe_hostname;
 ecrt_slave_config_eoe_ip_address;
 ecrt_slave_config_eoe_mac_address;
