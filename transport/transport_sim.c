@@ -102,6 +102,7 @@ typedef struct {
     uint8_t eoe_frame[1600]; /**< EoE frame reassembly buffer. */
     size_t eoe_len; /**< Bytes assembled so far. */
     uint8_t mbox_deaf; /**< Does not take mail (see sim_bus_mbox_deaf). */
+    uint8_t mbox_written; /**< A mail was written in the frame passing. */
     uint8_t mbox_second; /**< mbox_deaf 3: the next write is the second. */
     uint8_t eoe_late[4 + 1600]; /**< Echo held back (mbox_deaf 2). */
     uint16_t eoe_late_len; /**< Its length, 0: none. */
@@ -809,7 +810,11 @@ static void sim_slave_write_effects(sim_slave_t *slave, uint16_t adr,
     /* Receive mailbox (SM0 buffer): process the request. */
     if (slave->mbox_out_len && adr <= slave->mbox_out_phys
             && slave->mbox_out_phys < adr + len) {
-        sim_mbox_request(slave);
+        /* Acted on when the frame has passed (sim_bus_frame_end()): a
+         * sync manager takes its data at the end of the frame, so a second
+         * write to the mailbox in the same frame is taken as well and
+         * replaces the first. */
+        slave->mbox_written = 1;
     }
 }
 
@@ -1112,6 +1117,18 @@ static int sim_bus_process_frame(sim_bus_t *bus, uint8_t *frame, size_t size)
 
         pos += SIM_DGRAM_HDR_LEN + dlen + 2;
     } while (more);
+
+    /* the frame has passed: the mailboxes written in it are processed */
+    {
+        unsigned int i;
+
+        for (i = 0; i < bus->nslaves; i++) {
+            if (bus->slaves[i].mbox_written) {
+                bus->slaves[i].mbox_written = 0;
+                sim_mbox_request(&bus->slaves[i]);
+            }
+        }
+    }
 
     return 0;
 }

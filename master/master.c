@@ -1015,6 +1015,29 @@ int ec_master_send_datagrams(
                 continue;
             }
 
+            // Two writes to the same place of one slave do not go into one
+            // frame. A slave takes what was written to a mailbox at the end
+            // of the frame: of two mails in one frame (an SDO request and
+            // an EoE fragment) both get a working counter and the second
+            // replaces the first, which then is never answered. The later
+            // one waits for the next frame, in the next call.
+            if (datagram->type == EC_DATAGRAM_FPWR) {
+                ec_datagram_t *other;
+                int clash = 0;
+
+                list_for_each_entry(other, &sent_datagrams, sent) {
+                    if (other->type == EC_DATAGRAM_FPWR
+                            && !memcmp(other->address, datagram->address,
+                                EC_ADDR_LEN)) {
+                        clash = 1;
+                        break;
+                    }
+                }
+                if (clash) {
+                    continue;
+                }
+            }
+
             if (!frame_data) {
                 // fetch pointer to transmit socket buffer
                 frame_data =
