@@ -600,11 +600,15 @@ bus without EoE slaves has no added work in the application's cycle.
 
 The places are lock-free (EMPTY/WRITING/FULL/READING by compare-and-swap),
 since the readers run in three threads, one of them realtime; nothing waits
-and nothing is allocated after the bus scan. One place per reader: a second
-mail for a reader that has not taken the first replaces it (two CoE mails
-fetched by the EoE handler in a row, for example an emergency message and
-then a response; the state machines poll every cycle, so the first is
-normally taken in between). `ecrt_voe_handler_read_nosync()` reads the
+and nothing is allocated after the bus scan. Each reader has a row of
+eight places (`EC_MBOX_STASH_DEPTH`), taken oldest first: a slave sends the
+fragments of an Ethernet frame, or the parts of an SDO information list,
+one right after the other, and the reader holding the mailbox fetches them
+about as fast as their owner takes them. With one place, a real EoE slave
+lost a fragment now and then while the master read its SDO dictionary. A
+mail that finds the row full is lost, with a warning. A new request empties
+its reader's places in the row except emergency messages; taking passes
+over the emptied ones. `ecrt_voe_handler_read_nosync()` reads the
 mailbox without a check and so without the token; a reader fetching at the
 same moment can find the mailbox empty.
 

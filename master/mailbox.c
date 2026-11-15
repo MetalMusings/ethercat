@@ -116,7 +116,7 @@ uint8_t *ec_slave_mbox_prepare_send(const ec_slave_t *slave, /**< slave */
 int ec_slave_mbox_stash_alloc(ec_slave_t *slave /**< slave */)
 {
     ec_mbox_stash_t *stash;
-    unsigned int i;
+    unsigned int i, k;
 
     if (slave->mbox_stash) {
         return 0;
@@ -132,17 +132,21 @@ int ec_slave_mbox_stash_alloc(ec_slave_t *slave /**< slave */)
     stash->fetch_time = 0;
     stash->mem_size = EC_MAX_DATA_SIZE;
     for (i = 0; i < EC_MBOX_USER_COUNT; i++) {
-        stash->slot[i].state = EC_MBOX_SLOT_EMPTY;
-        stash->slot[i].size = 0;
-        stash->slot[i].data = NULL;
+        stash->slot[i].wr = 0;
+        stash->slot[i].rd = 0;
+        for (k = 0; k < EC_MBOX_STASH_DEPTH; k++) {
+            stash->slot[i].mail[k].state = EC_MBOX_SLOT_EMPTY;
+            stash->slot[i].mail[k].size = 0;
+            stash->slot[i].mail[k].data = NULL;
+        }
     }
     for (i = 0; i < EC_MBOX_USER_COUNT; i++) {
-        if (!(stash->slot[i].data = ec_alloc(stash->mem_size))) {
-            while (i--) {
-                ec_free(stash->slot[i].data);
+        for (k = 0; k < EC_MBOX_STASH_DEPTH; k++) {
+            if (!(stash->slot[i].mail[k].data = ec_alloc(stash->mem_size))) {
+                slave->mbox_stash = stash;
+                ec_slave_mbox_stash_free(slave); // frees what there is
+                goto out_err;
             }
-            ec_free(stash);
-            goto out_err;
         }
     }
 
@@ -161,13 +165,17 @@ out_err:
  */
 void ec_slave_mbox_stash_free(ec_slave_t *slave /**< slave */)
 {
-    unsigned int i;
+    unsigned int i, k;
 
     if (!slave->mbox_stash) {
         return;
     }
     for (i = 0; i < EC_MBOX_USER_COUNT; i++) {
-        ec_free(slave->mbox_stash->slot[i].data);
+        for (k = 0; k < EC_MBOX_STASH_DEPTH; k++) {
+            if (slave->mbox_stash->slot[i].mail[k].data) {
+                ec_free(slave->mbox_stash->slot[i].mail[k].data);
+            }
+        }
     }
     ec_free(slave->mbox_stash);
     slave->mbox_stash = NULL;
@@ -207,7 +215,7 @@ static ec_mbox_user_t ec_mbox_user_of(
 
 /** Whether a mail put aside is a CoE emergency message.
  */
-static int ec_mbox_is_coe_emergency(const ec_mbox_slot_t *slot)
+static int ec_mbox_is_coe_emergency(const ec_mbox_mail_t *slot)
 {
     return slot->size >= EC_MBOX_HEADER_SIZE + 2
         && (EC_READ_U8(slot->data + 5) & 0x0F) == EC_MBOX_TYPE_COE
@@ -228,30 +236,38 @@ void ec_slave_mbox_stash_drop(
 {
     ec_mbox_stash_t *stash = slave->mbox_stash;
     ec_mbox_slot_t *slot;
-    int state = EC_MBOX_SLOT_FULL;
+    unsigned int i, wr;
 
     if (!stash || user >= EC_MBOX_USER_COUNT) {
         return;
     }
+
     slot = &stash->slot[user];
-    if (!atomic_compare_exchange_strong(&slot->state, &state,
-                EC_MBOX_SLOT_READING)) {
-        return;
+    wr = atomic_load(&slot->wr);
+    for (i = atomic_load(&slot->rd); i != wr; i++) {
+        ec_mbox_mail_t *mail = &slot->mail[i % EC_MBOX_STASH_DEPTH];
+        int state = EC_MBOX_SLOT_FULL;
+
+        if (!atomic_compare_exchange_strong(&mail->state, &state,
+                    EC_MBOX_SLOT_READING)) {
+            continue;
+        }
+        if (user == EC_MBOX_USER_COE && ec_mbox_is_coe_emergency(mail)) {
+            atomic_store(&mail->state, EC_MBOX_SLOT_FULL);
+            continue;
+        }
+        EC_SLAVE_DBG(slave, 1, "Dropped an old mailbox response (protocol"
+                " 0x%02X) before a new request.\n",
+                EC_READ_U8(mail->data + 5) & 0x0F);
+        // an empty place between the others: passed over when taking
+        atomic_store(&mail->state, EC_MBOX_SLOT_EMPTY);
     }
-    if (user == EC_MBOX_USER_COE && ec_mbox_is_coe_emergency(slot)) {
-        atomic_store(&slot->state, EC_MBOX_SLOT_FULL);
-        return;
-    }
-    EC_SLAVE_DBG(slave, 1, "Dropped an old mailbox response (protocol"
-            " 0x%02X) before a new request.\n",
-            EC_READ_U8(slot->data + 5) & 0x0F);
-    atomic_store(&slot->state, EC_MBOX_SLOT_EMPTY);
 }
 
 /****************************************************************************/
 
-/** Puts a fetched mail aside for the reader it belongs to. An older mail
- * still there is replaced.
+/** Puts a fetched mail aside for the reader it belongs to, behind those
+ * already there. With all places taken the mail is lost.
  */
 static void ec_mbox_stash_put(
         const ec_slave_t *slave, /**< slave */
@@ -261,39 +277,56 @@ static void ec_mbox_stash_put(
         )
 {
     ec_mbox_slot_t *slot = &slave->mbox_stash->slot[owner];
-    int state = atomic_load(&slot->state);
+    unsigned int wr = atomic_load(&slot->wr);
+    ec_mbox_mail_t *place = &slot->mail[wr % EC_MBOX_STASH_DEPTH];
+    int state = EC_MBOX_SLOT_EMPTY;
 
-    // Take the slot from EMPTY or FULL. Its reader holds it (READING)
-    // only while copying; another writer cannot exist, because only the
-    // reader holding the token fetches.
-    for (;;) {
-        if (state != EC_MBOX_SLOT_EMPTY && state != EC_MBOX_SLOT_FULL) {
-            EC_SLAVE_WARN(slave, "Mailbox response (protocol 0x%02X) lost:"
-                    " its place is in use.\n",
-                    EC_READ_U8(mail + 5) & 0x0F);
-            return;
-        }
-        if (atomic_compare_exchange_weak(&slot->state, &state,
-                    EC_MBOX_SLOT_WRITING)) {
-            break;
-        }
-    }
-
-    if (state == EC_MBOX_SLOT_FULL) {
+    // Only the reader holding the token fetches: one writer at a time.
+    // A place the readers have passed (rd) is empty.
+    if (wr - atomic_load(&slot->rd) >= EC_MBOX_STASH_DEPTH
+            || !atomic_compare_exchange_strong(&place->state, &state,
+                EC_MBOX_SLOT_WRITING)) {
         if (ec_log_ratelimit()) {
-            EC_SLAVE_WARN(slave, "Mailbox response (protocol 0x%02X)"
-                    " lost: the next one came before it was read.\n",
-                    EC_READ_U8(slot->data + 5) & 0x0F);
+            EC_SLAVE_WARN(slave, "Mailbox response (protocol 0x%02X) lost:"
+                    " %u before it are not read yet.\n",
+                    EC_READ_U8(mail + 5) & 0x0F, EC_MBOX_STASH_DEPTH);
         }
+        return;
     }
-    memcpy(slot->data, mail, size);
-    slot->size = size;
-    atomic_store(&slot->state, EC_MBOX_SLOT_FULL);
+
+    memcpy(place->data, mail, size);
+    place->size = size;
+    atomic_store(&place->state, EC_MBOX_SLOT_FULL);
+    atomic_store(&slot->wr, wr + 1);
 }
 
 /****************************************************************************/
 
-/** Takes the mail put aside for a reader into the reader's datagram.
+/** The oldest mail put aside for a reader, places emptied by
+ * ec_slave_mbox_stash_drop() passed over.
+ *
+ * \return The mail, or NULL if there is none.
+ */
+static ec_mbox_mail_t *ec_mbox_stash_first(ec_mbox_slot_t *slot)
+{
+    for (;;) {
+        unsigned int rd = atomic_load(&slot->rd);
+        ec_mbox_mail_t *mail;
+
+        if (rd == atomic_load(&slot->wr)) {
+            return NULL;
+        }
+        mail = &slot->mail[rd % EC_MBOX_STASH_DEPTH];
+        if (atomic_load(&mail->state) != EC_MBOX_SLOT_EMPTY) {
+            return mail;
+        }
+        atomic_compare_exchange_strong(&slot->rd, &rd, rd + 1);
+    }
+}
+
+/****************************************************************************/
+
+/** Takes the oldest mail put aside for a reader into the reader's datagram.
  *
  * \return 1 if there was one, else 0.
  */
@@ -304,18 +337,24 @@ static int ec_mbox_stash_take(
         )
 {
     ec_mbox_slot_t *slot = &slave->mbox_stash->slot[user];
+    ec_mbox_mail_t *mail = ec_mbox_stash_first(slot);
+    unsigned int rd = atomic_load(&slot->rd);
     int state = EC_MBOX_SLOT_FULL;
 
-    if (!atomic_compare_exchange_strong(&slot->state, &state,
+    if (!mail || mail != &slot->mail[rd % EC_MBOX_STASH_DEPTH]
+            || !atomic_compare_exchange_strong(&mail->state, &state,
                 EC_MBOX_SLOT_READING)) {
         return 0;
     }
-    if (slot->size > datagram->mem_size) { // never: see prepare_fetch
-        atomic_store(&slot->state, EC_MBOX_SLOT_FULL);
+
+    if (mail->size > datagram->mem_size) { // never: see prepare_fetch
+        atomic_store(&mail->state, EC_MBOX_SLOT_FULL);
         return 0;
     }
-    memcpy(datagram->data, slot->data, slot->size);
-    atomic_store(&slot->state, EC_MBOX_SLOT_EMPTY);
+
+    memcpy(datagram->data, mail->data, mail->size);
+    atomic_store(&mail->state, EC_MBOX_SLOT_EMPTY);
+    atomic_compare_exchange_strong(&slot->rd, &rd, rd + 1);
     return 1;
 }
 
@@ -374,7 +413,7 @@ int ec_slave_mbox_check(const ec_slave_t *slave, /**< slave */
     }
 
     // a mail another reader fetched and put aside
-    if (atomic_load(&stash->slot[user].state) == EC_MBOX_SLOT_FULL) {
+    if (ec_mbox_stash_first(&stash->slot[user])) {
         return 1;
     }
 

@@ -289,6 +289,102 @@ int main(void)
     data = ec_slave_mbox_fetch(&slave, &coe, EC_MBOX_USER_COE, &type, &size);
     TEST_CHECK(IS_ERR(data));
 
+    /* Several mails for one reader in a row, fetched by the other before
+     * the first is taken (the fragments of an Ethernet frame while the CoE
+     * reader holds the mailbox): all are kept, in order. Of more than
+     * there are places for, the last are lost. */
+    {
+        unsigned int k, t = 900;
+
+        for (k = 0; k < EC_MBOX_STASH_DEPTH + 2; k++, t += 3) {
+            checked(&coe, 1, t);
+            TEST_CHECK_EQ(1,
+                    ec_slave_mbox_check(&slave, &coe, EC_MBOX_USER_COE));
+            ec_slave_mbox_prepare_fetch(&slave, &coe, EC_MBOX_USER_COE);
+            TEST_CHECK_EQ(TX_OFFSET, address(&coe));
+            fetched(&coe, EC_MBOX_TYPE_EOE, 0x00, (uint8_t) (0x40 + k),
+                    t + 1);
+            TEST_CHECK(ec_slave_mbox_fetch(&slave, &coe, EC_MBOX_USER_COE,
+                        &type, &size) == NULL);
+        }
+        for (k = 0; k < EC_MBOX_STASH_DEPTH; k++, t += 3) {
+            checked(&eoe, 0, t); /* the mailbox itself is empty */
+            TEST_CHECK_EQ(1, ec_slave_mbox_check(&slave, &eoe,
+                        EC_MBOX_USER_EOE_FRAME));
+            ec_slave_mbox_prepare_fetch(&slave, &eoe,
+                    EC_MBOX_USER_EOE_FRAME);
+            eoe.working_counter = 1;
+            data = ec_slave_mbox_fetch(&slave, &eoe,
+                    EC_MBOX_USER_EOE_FRAME, &type, &size);
+            TEST_CHECK(data != NULL && !IS_ERR(data));
+            if (data && !IS_ERR(data)) {
+                TEST_CHECK_EQ(0x40 + (int) k, data[1]);
+            }
+        }
+        checked(&eoe, 0, t);
+        TEST_CHECK_EQ(0, ec_slave_mbox_check(&slave, &eoe,
+                    EC_MBOX_USER_EOE_FRAME));
+
+        /* and the places are used again, past the end of the row */
+        t += 3;
+        for (k = 0; k < 3; k++, t += 3) {
+            checked(&coe, 1, t);
+            TEST_CHECK_EQ(1,
+                    ec_slave_mbox_check(&slave, &coe, EC_MBOX_USER_COE));
+            ec_slave_mbox_prepare_fetch(&slave, &coe, EC_MBOX_USER_COE);
+            fetched(&coe, EC_MBOX_TYPE_EOE, 0x00, (uint8_t) (0x60 + k),
+                    t + 1);
+            TEST_CHECK(ec_slave_mbox_fetch(&slave, &coe, EC_MBOX_USER_COE,
+                        &type, &size) == NULL);
+        }
+        for (k = 0; k < 3; k++, t += 3) {
+            checked(&eoe, 0, t);
+            TEST_CHECK_EQ(1, ec_slave_mbox_check(&slave, &eoe,
+                        EC_MBOX_USER_EOE_FRAME));
+            ec_slave_mbox_prepare_fetch(&slave, &eoe,
+                    EC_MBOX_USER_EOE_FRAME);
+            eoe.working_counter = 1;
+            data = ec_slave_mbox_fetch(&slave, &eoe,
+                    EC_MBOX_USER_EOE_FRAME, &type, &size);
+            TEST_CHECK(data != NULL && !IS_ERR(data));
+            if (data && !IS_ERR(data)) {
+                TEST_CHECK_EQ(0x60 + (int) k, data[1]);
+            }
+        }
+    }
+
+    /* An emergency message and an old response wait; a new request forgets
+     * the response only, and the emergency is still read. */
+    {
+        unsigned int t = 1200;
+        static const uint8_t kind[3] = { 0x30, 0x10, 0x30 };
+        unsigned int k;
+
+        for (k = 0; k < 3; k++, t += 3) {
+            checked(&eoe, 1, t);
+            TEST_CHECK_EQ(1, ec_slave_mbox_check(&slave, &eoe,
+                        EC_MBOX_USER_EOE_FRAME));
+            ec_slave_mbox_prepare_fetch(&slave, &eoe,
+                    EC_MBOX_USER_EOE_FRAME);
+            fetched(&eoe, EC_MBOX_TYPE_COE, 0x00, kind[k], t + 1);
+            TEST_CHECK(ec_slave_mbox_fetch(&slave, &eoe,
+                        EC_MBOX_USER_EOE_FRAME, &type, &size) == NULL);
+        }
+        ec_slave_mbox_prepare_send(&slave, &coe, EC_MBOX_TYPE_COE, 10);
+        checked(&coe, 0, t);
+        TEST_CHECK_EQ(1, ec_slave_mbox_check(&slave, &coe, EC_MBOX_USER_COE));
+        ec_slave_mbox_prepare_fetch(&slave, &coe, EC_MBOX_USER_COE);
+        coe.working_counter = 1;
+        data = ec_slave_mbox_fetch(&slave, &coe, EC_MBOX_USER_COE, &type,
+                &size);
+        TEST_CHECK(data != NULL && !IS_ERR(data));
+        if (data && !IS_ERR(data)) {
+            TEST_CHECK_EQ(0x10, data[1]);
+        }
+        checked(&coe, 0, t + 3);
+        TEST_CHECK_EQ(0, ec_slave_mbox_check(&slave, &coe, EC_MBOX_USER_COE));
+    }
+
     /* The bus scan reads the mailbox as it is. */
     checked(&coe, 1, 800);
     checked(&eoe, 1, 800);

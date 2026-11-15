@@ -78,11 +78,24 @@ enum {
     EC_MBOX_SLOT_READING
 };
 
-/** A mail put aside for one reader. */
+/** Mails kept per reader. Another reader fetches what the slave sends,
+ * about as fast as the owner takes it: fragments of an Ethernet frame, or
+ * the parts of an SDO information list, come one right after the other. */
+#define EC_MBOX_STASH_DEPTH 8
+
+/** A mail put aside. */
 typedef struct {
     EC_PAL_SHARED int state; /**< EC_MBOX_SLOT_*. */
     size_t size; /**< Size of the mail with its header. */
     uint8_t *data; /**< The mail (ec_mbox_stash_t::mem_size bytes). */
+} ec_mbox_mail_t;
+
+/** The mails put aside for one reader, oldest first. */
+typedef struct {
+    EC_PAL_SHARED unsigned int wr; /**< Mails put, counted on (the reader
+                                     holding the token writes). */
+    EC_PAL_SHARED unsigned int rd; /**< Mails taken or passed over. */
+    ec_mbox_mail_t mail[EC_MBOX_STASH_DEPTH];
 } ec_mbox_slot_t;
 
 /** A slave's mails put aside, and who is fetching from its mailbox. */
