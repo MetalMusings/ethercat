@@ -196,11 +196,14 @@ int ec_eoe_send(ec_eoe_t *eoe /**< EoE handler */)
 
     remaining_size = eoe->tx_frame->skb->len - eoe->tx_offset;
 
-    if (remaining_size <= (size_t) (eoe->slave->configured_tx_mailbox_size - 10)) {
+    // the fragment goes into the slave's receive mailbox (the one
+    // ec_slave_mbox_prepare_send() writes): its size limits the fragment,
+    // not the send mailbox's, which may be another size
+    if (remaining_size <= (size_t) (eoe->slave->configured_rx_mailbox_size - 10)) {
         current_size = remaining_size;
         last_fragment = 1;
     } else {
-        current_size = ((eoe->slave->configured_tx_mailbox_size - 10) / 32) * 32;
+        current_size = ((eoe->slave->configured_rx_mailbox_size - 10) / 32) * 32;
         last_fragment = 0;
     }
 
@@ -265,8 +268,11 @@ void ec_eoe_run(ec_eoe_t *eoe /**< EoE handler */)
     if (!eoe->opened)
         return;
 
-    // if the datagram was not sent, or is not yet received, skip this cycle
-    if (eoe->queue_datagram || eoe->datagram.state == EC_DATAGRAM_SENT)
+    // if the datagram was not sent, or is not yet received, skip this cycle;
+    // while QUEUED or SENT it belongs to the side that owns the bus I/O
+    // (see ec_master_queue_datagram_ext())
+    if (eoe->queue_datagram || eoe->datagram.state == EC_DATAGRAM_QUEUED
+            || eoe->datagram.state == EC_DATAGRAM_SENT)
         return;
 
     // call state function

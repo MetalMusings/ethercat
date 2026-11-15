@@ -69,6 +69,15 @@ sudo ip link set dev enp2s0 xdp off
 LinuxCNC with `ecat` stops a free-running master on the same interface
 when it starts.
 
+## Ethernet over EtherCAT (EoE)
+
+A slave with EoE gets a network device `eoe0s<position>` (a TAP device) on
+the host when the master scans the bus. Inside LinuxCNC, the EoE traffic
+rides in `ecat`'s cyclic frames, so the servo thread never waits for it
+(no callbacks needed; `docs/design/userspace-master.md`, "EoE After
+Activation"). Expect about one mailbox (often 128 to 1024 bytes) per EoE
+slave per servo cycle in each direction, and frames that much longer.
+
 ## From version 1.0 and lcec_uspace
 
 Up to 1.0 this package was built from

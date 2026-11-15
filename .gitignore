@@ -82,5 +82,6 @@ tests/test_xdp_keep
 tests/test_rt_pagefault
 master/uspace/ethercat-config.cmake
 tests/test_sim_eoe
+tests/test_sim_eoe_cyclic
 *.tar.bz2
 *.tar.gz

@@ -49,6 +49,7 @@ check_PROGRAMS = \
 	test_sim_dict_bg \
 	test_sim_domain \
 	test_sim_eoe \
+	test_sim_eoe_cyclic \
 	test_sim_irq_pin \
 	test_sim_link \
 	test_sim_multi \
@@ -92,6 +93,7 @@ test_sim_dc_ref_clock_SOURCES = test_sim_dc_ref_clock.c test.h
 test_sim_dict_bg_SOURCES = test_sim_dict_bg.c test.h
 test_sim_domain_SOURCES = test_sim_domain.c test.h
 test_sim_eoe_SOURCES = test_sim_eoe.c test.h
+test_sim_eoe_cyclic_SOURCES = test_sim_eoe_cyclic.c test.h
 test_sim_irq_pin_SOURCES = test_sim_irq_pin.c test.h
 test_sim_link_SOURCES = test_sim_link.c test.h
 test_sim_multi_SOURCES = test_sim_multi.c test.h

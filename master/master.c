@@ -101,6 +101,7 @@ static void sc_reset_task_kicker(ec_irq_work_t *work);
 static void sc_reset_task(ec_work_t *work);
 
 int ecrt_master_send_ext(ec_master_t *master);
+static void ec_master_queue_ext_datagrams(ec_master_t *) EC_RT_ATTR;
 
 /****************************************************************************/
 
@@ -224,6 +225,7 @@ int ec_master_init(ec_master_t *master, /**< EtherCAT master */
 
 #ifdef EC_EOE
     master->eoe_thread = NULL;
+    master->eoe_cyclic = 0;
     INIT_LIST_HEAD(&master->eoe_handlers);
 #endif
 
@@ -380,6 +382,58 @@ void ec_master_clear(
 /****************************************************************************/
 
 #ifdef EC_EOE
+/** Longest wait for the bus I/O side to let go of an EoE datagram [us]. */
+#define EC_EOE_RECLAIM_TIMEOUT_US 100000
+
+/** Takes an EoE handler's datagram back before the handler goes away.
+ *
+ * The datagram may still be in the external queue, or (state QUEUED or
+ * SENT) in the datagram queue of the thread that owns the bus I/O. The
+ * first is undone here under the queue lock. When the EoE thread ran in
+ * cyclic mode, the application's thread owns the datagram queue and is a
+ * different thread from the caller (the master's state machine thread
+ * during a rescan in OP): wait until it has published a final state, which
+ * it does at the latest when the datagram times out. Otherwise the caller
+ * owns the bus I/O itself, or nobody does.
+ *
+ * Uses the master, not eoe->slave: at release, the slaves are already gone
+ * (ec_master_leave_idle_phase()).
+ */
+static void ec_master_reclaim_eoe_datagram(
+        ec_master_t *master, /**< EtherCAT master */
+        ec_datagram_t *datagram /**< The EoE handler's datagram. */
+        )
+{
+    ec_sem_down(&master->ext_queue_sem);
+    if (!list_empty(&datagram->ext_queue)) {
+        list_del_init(&datagram->ext_queue);
+        datagram->state = EC_DATAGRAM_INIT;
+    }
+    ec_sem_up(&master->ext_queue_sem);
+
+#ifdef EC_USPACE_MASTER
+    if (master->eoe_cyclic) {
+        unsigned int waited_us = 0;
+        struct timespec ts = { 0, 100000L };
+
+        while ((datagram->state == EC_DATAGRAM_QUEUED
+                    || datagram->state == EC_DATAGRAM_SENT)
+                && waited_us < EC_EOE_RECLAIM_TIMEOUT_US) {
+            nanosleep(&ts, NULL);
+            waited_us += 100;
+        }
+        if (datagram->state == EC_DATAGRAM_QUEUED
+                || datagram->state == EC_DATAGRAM_SENT) {
+            EC_MASTER_WARN(master, "EoE datagram still queued after"
+                    " %u ms without a cycle; taking it back.\n",
+                    EC_EOE_RECLAIM_TIMEOUT_US / 1000);
+        }
+    }
+#endif
+}
+
+/****************************************************************************/
+
 /** Clear and free all EoE handlers.
  */
 void ec_master_clear_eoe_handlers(
@@ -390,6 +444,7 @@ void ec_master_clear_eoe_handlers(
 
     list_for_each_entry_safe(eoe, next, &master->eoe_handlers, list) {
         list_del(&eoe->list);
+        ec_master_reclaim_eoe_datagram(master, &eoe->datagram);
         ec_eoe_clear(eoe);
         ec_free(eoe);
     }
@@ -901,12 +956,21 @@ void ec_master_queue_datagram(
 /****************************************************************************/
 
 /** Places a datagram in the non-application datagram queue.
+ *
+ * Used by the EoE thread. The datagram is handed over to the side that
+ * owns the bus I/O: its state is QUEUED from here until the I/O side
+ * publishes RECEIVED, TIMED_OUT or ERROR, and the EoE thread neither
+ * reads nor writes it meanwhile (ec_eoe_run()). The state store comes
+ * before the queue lock, so that the I/O side never sees a datagram in
+ * this queue in another state. The data written before the store is
+ * published to the I/O side by the lock.
  */
 void ec_master_queue_datagram_ext(
         ec_master_t *master, /**< EtherCAT master */
         ec_datagram_t *datagram /**< datagram */
         )
 {
+    datagram->state = EC_DATAGRAM_QUEUED;
     ec_sem_down(&master->ext_queue_sem);
     list_add_tail(&datagram->ext_queue, &master->ext_datagram_queue);
     ec_sem_up(&master->ext_queue_sem);
@@ -1167,17 +1231,14 @@ void ec_master_receive_datagrams(
 
         // dequeue the received datagram; the atomic state store is the
         // publication point in userspace mode, so all result fields
-        // (working counter, data, reception time) must be written
-        // before it. The list_del_init() may safely follow the store:
-        // the queue node is only ever touched by the IO-owning thread
-        // (RT app thread in OP, idle thread in IDLE) — FSM-side
-        // re-queueing goes through the injection_seq / ext_ring
-        // handshake and the list manipulation for it happens on the IO
-        // side in ec_master_inject_external_datagrams().
+        // (working counter, data, reception time) and the dequeueing
+        // must come before it. After the store, the IO side does not
+        // touch the datagram again: the EoE thread may then requeue it,
+        // or free it with its handler (ec_eoe_clear()).
         datagram->time_received =
             master->devices[EC_DEVICE_MAIN].time_poll;
-        datagram->state = EC_DATAGRAM_RECEIVED;
         list_del_init(&datagram->queue);
+        datagram->state = EC_DATAGRAM_RECEIVED;
     }
 }
 
@@ -1508,13 +1569,25 @@ void ec_master_eoe_start(ec_master_t *master /**< EtherCAT master */)
     if (list_empty(&master->eoe_handlers))
         return;
 
+    master->eoe_cyclic = 0;
     if (!master->send_cb || !master->receive_cb) {
+#ifdef EC_USPACE_MASTER
+        /* The application registered no callbacks (after activation):
+         * the EoE thread only runs the EoE state machines, and its
+         * datagrams go out in the application's cyclic frames
+         * (ec_master_queue_ext_datagrams()). The application's thread
+         * is never held up by the EoE thread, which a shared lock
+         * around send and receive would do. */
+        master->eoe_cyclic = 1;
+#else
         EC_MASTER_WARN(master, "No EoE processing"
                 " because of missing callbacks!\n");
         return;
+#endif
     }
 
-    EC_MASTER_INFO(master, "Starting EoE thread.\n");
+    EC_MASTER_INFO(master, "Starting EoE thread%s.\n",
+            master->eoe_cyclic ? " (datagrams in the cyclic frames)" : "");
     master->eoe_thread = ec_thread_run(ec_master_eoe_thread, master,
             "EtherCAT-EoE");
     if (IS_ERR(master->eoe_thread)) {
@@ -1552,6 +1625,7 @@ static int ec_master_eoe_thread(void *priv_data)
     ec_master_t *master = (ec_master_t *) priv_data;
     ec_eoe_t *eoe;
     unsigned int none_open, sth_to_send, all_idle;
+    const unsigned int cyclic = master->eoe_cyclic;
 
     EC_MASTER_DBG(master, 1, "EoE thread running.\n");
 
@@ -1568,8 +1642,11 @@ static int ec_master_eoe_thread(void *priv_data)
         if (none_open)
             goto schedule;
 
-        // receive datagrams
-        master->receive_cb(master->cb_data);
+        // receive datagrams (in cyclic mode, the application's
+        // ecrt_master_receive() has done it)
+        if (!cyclic) {
+            master->receive_cb(master->cb_data);
+        }
 
         // actual EoE processing
         sth_to_send = 0;
@@ -1588,14 +1665,32 @@ static int ec_master_eoe_thread(void *priv_data)
             list_for_each_entry(eoe, &master->eoe_handlers, list) {
                 ec_eoe_queue(eoe);
             }
-            // (try to) send datagrams
-            master->send_cb(master->cb_data);
+            // (try to) send datagrams (in cyclic mode, the application's
+            // ecrt_master_send() takes them)
+            if (!cyclic) {
+                master->send_cb(master->cb_data);
+            }
         }
 
 schedule:
         if (all_idle) {
             // TODO: this must go (better scheduling strategy needed)
             ec_thread_yield_timeout(1);
+#ifdef EC_USPACE_MASTER
+        } else if (cyclic) {
+            // a datagram moves one step per application cycle: poll a few
+            // times per cycle instead of spinning
+            struct timespec ts;
+            unsigned int us = master->send_interval / 4;
+            if (us < 50) {
+                us = 50;
+            } else if (us > 250) {
+                us = 250;
+            }
+            ts.tv_sec = 0;
+            ts.tv_nsec = (long) us * 1000L;
+            nanosleep(&ts, NULL);
+#endif
         } else {
             ec_thread_yield();
         }
@@ -2388,6 +2483,7 @@ int ecrt_master_send(ec_master_t *master)
     }
 
     ec_master_inject_external_datagrams(master);
+    ec_master_queue_ext_datagrams(master);
 
     sent_bytes = 0;
     for (dev_idx = EC_DEVICE_MAIN; dev_idx < ec_master_num_devices(master);
@@ -2397,8 +2493,10 @@ int ecrt_master_send(ec_master_t *master)
             list_for_each_entry_safe(datagram, n,
                     &master->datagram_queue, queue) {
                 if (datagram->device_index == dev_idx) {
-                    datagram->state = EC_DATAGRAM_ERROR;
+                    // dequeue before the state store (see
+                    // ec_master_receive_datagrams())
                     list_del_init(&datagram->queue);
+                    datagram->state = EC_DATAGRAM_ERROR;
                 }
             }
 
@@ -2463,6 +2561,46 @@ int ecrt_master_receive(ec_master_t *master)
         }
     }
     return 0;
+}
+
+/****************************************************************************/
+
+/** Moves datagrams from the non-application queue (EoE) into the datagram
+ * queue, as many as fit in the send interval's frame budget.
+ *
+ * Called by ecrt_master_send() on the thread that owns the bus I/O. This
+ * is how the EoE thread's datagrams reach the bus when the application
+ * registered no callbacks (ec_master_eoe_start()): they ride in the
+ * application's cyclic frames, and the EoE thread never sends or receives
+ * itself. Never blocks: if the EoE thread holds the queue lock just now,
+ * its datagrams wait for the next cycle. A datagram that does not fit
+ * waits too, unless the queue is otherwise empty.
+ */
+static void ec_master_queue_ext_datagrams(ec_master_t *master)
+{
+    ec_datagram_t *datagram, *next;
+    size_t queue_size = 0;
+
+    list_for_each_entry(datagram, &master->datagram_queue, queue) {
+        if (datagram->state == EC_DATAGRAM_QUEUED) {
+            queue_size += datagram->data_size;
+        }
+    }
+
+    if (ec_sem_down_trylock(&master->ext_queue_sem))
+        return;
+
+    list_for_each_entry_safe(datagram, next, &master->ext_datagram_queue,
+            ext_queue) {
+        if (queue_size && queue_size + datagram->data_size
+                > master->max_queue_size) {
+            break;
+        }
+        list_del_init(&datagram->ext_queue);
+        ec_master_queue_datagram(master, datagram);
+        queue_size += datagram->data_size;
+    }
+    ec_sem_up(&master->ext_queue_sem);
 }
 
 /****************************************************************************/

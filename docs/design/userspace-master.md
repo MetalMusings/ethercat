@@ -504,11 +504,53 @@ future updates; exported symbols are governed by
 
 ## Known Limitations and Usage Notes
 
-### EoE Callback Requirement
+### EoE After Activation: Callbacks or Cyclic Frames
 
-`ecrt_master_callbacks()` must be called before `ecrt_master_activate()` for
-EoE (Ethernet over EtherCAT) processing to be enabled. If callbacks are not
-set, EoE is effectively disabled for the master by design.
+EoE (Ethernet over EtherCAT) runs in its own thread, which has two ways to
+reach the bus once the application has activated the master:
+
+- **With `ecrt_master_callbacks()`** (upstream's way): the EoE thread
+  receives and sends itself, between the application's cycles, through the
+  callbacks, which must take the same lock as the application's cyclic
+  `ecrt_master_receive()`/`ecrt_master_send()`. The application's realtime
+  thread can then wait for the EoE thread (priority inversion), and the
+  EoE thread's frames go out at any time, also just before the cyclic one.
+- **Without callbacks** (this fork; it used to disable EoE): the EoE
+  thread only runs the EoE state machines. Its datagrams ride in the
+  application's own frames: `ecrt_master_send()` takes them from the
+  external queue (`ec_master_queue_ext_datagrams()`, trylock, within the
+  send interval's frame budget, else next cycle) and
+  `ecrt_master_receive()` brings their replies back. The EoE thread never
+  sends a frame and never holds up the application. It polls its handlers
+  a few times per cycle (send interval / 4, 50 to 250 us) while they are
+  busy, and every 4 ms when idle. One mailbox datagram per EoE slave per
+  cycle: roughly the mailbox size per cycle in each direction.
+
+The handover of a datagram between the EoE thread and the thread that owns
+the bus I/O is lock-free, by its atomic `state` (`EC_PAL_SHARED`):
+
+| State | Owner | |
+|---|---|---|
+| INIT, RECEIVED, TIMED_OUT, ERROR | EoE thread | may read and write the datagram |
+| QUEUED, SENT | I/O side | the EoE thread does not touch it (`ec_eoe_run()`) |
+
+The EoE thread writes the datagram, stores QUEUED, then puts it in the
+external queue under `ext_queue_sem` (`ec_master_queue_datagram_ext()`).
+The I/O side dequeues a received, timed-out or failed datagram from its
+queue *before* the state store that hands it back
+(`ec_master_receive_datagrams()`, link-down path in `ecrt_master_send()`),
+so it never touches the datagram afterwards.
+
+When the EoE handlers are cleared (rescan in OP after a link loss or a
+topology change, or release), `ec_master_clear_eoe_handlers()` takes each
+datagram back first: out of the external queue, and in cyclic mode it waits
+(up to 100 ms) until the application's thread has handed it back. Tested by
+`tests/test_sim_eoe_cyclic.c` (multi-fragment frames, no frames between
+cycles, process data complete, link loss with EoE datagrams in flight).
+
+Fixed on the way: the EoE sender cut frames into fragments by the slave's
+*send* mailbox size while writing them into its *receive* mailbox; slaves
+with mailboxes of different sizes got "Send error" for every larger frame.
 
 ### Transport Ops Visibility (`ectp.h`)
 

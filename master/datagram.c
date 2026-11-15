@@ -81,6 +81,7 @@ static const char *type_strings[] = {
 void ec_datagram_init(ec_datagram_t *datagram /**< EtherCAT datagram. */)
 {
     INIT_LIST_HEAD(&datagram->queue); // mark as unqueued
+    INIT_LIST_HEAD(&datagram->ext_queue); // not in the external queue
     datagram->device_index = EC_DEVICE_MAIN;
     datagram->type = EC_DATAGRAM_NONE;
     memset(datagram->address, 0x00, EC_ADDR_LEN);

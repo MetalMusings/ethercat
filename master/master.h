@@ -291,6 +291,11 @@ struct ec_master {
 
 #ifdef EC_EOE
     ec_thread_t *eoe_thread; /**< EoE thread. */
+    unsigned int eoe_cyclic; /**< The EoE thread runs without callbacks:
+                               its datagrams go out with the application's
+                               ecrt_master_send(), and the application's
+                               thread owns the bus I/O (see
+                               ec_master_eoe_start()). */
     struct list_head eoe_handlers; /**< Ethernet over EtherCAT handlers. */
 #endif
 
