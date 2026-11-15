@@ -2483,7 +2483,10 @@ int ecrt_master_send(ec_master_t *master)
     }
 
     ec_master_inject_external_datagrams(master);
-    ec_master_queue_ext_datagrams(master);
+    if (master->eoe_cyclic) {
+        // only with EoE slaves and no callbacks (ec_master_eoe_start())
+        ec_master_queue_ext_datagrams(master);
+    }
 
     sent_bytes = 0;
     for (dev_idx = EC_DEVICE_MAIN; dev_idx < ec_master_num_devices(master);

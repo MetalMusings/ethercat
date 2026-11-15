@@ -91,9 +91,24 @@ int main(void)
     slave.configured_tx_mailbox_size = TX_SIZE;
     slave.configured_rx_mailbox_offset = 0x1000;
     slave.configured_rx_mailbox_size = TX_SIZE;
-    slave.sii.mailbox_protocols = EC_MBOX_COE | EC_MBOX_EOE;
     ec_datagram_init(&coe);
     ec_datagram_init(&eoe);
+
+    /* A slave without EoE gets no places: its mailbox is read as it
+     * always was. A mail of another protocol is handed to the caller. */
+    slave.sii.mailbox_protocols = EC_MBOX_COE | EC_MBOX_FOE;
+    TEST_CHECK_EQ(0, ec_slave_mbox_stash_alloc(&slave));
+    TEST_CHECK(slave.mbox_stash == NULL);
+    checked(&coe, 1, 1);
+    TEST_CHECK_EQ(1, ec_slave_mbox_check(&slave, &coe, EC_MBOX_USER_COE));
+    ec_slave_mbox_prepare_fetch(&slave, &coe, EC_MBOX_USER_COE);
+    TEST_CHECK_EQ(TX_OFFSET, address(&coe));
+    fetched(&coe, EC_MBOX_TYPE_FOE, 0x11, 0x22, 2);
+    data = ec_slave_mbox_fetch(&slave, &coe, EC_MBOX_USER_COE, &type, &size);
+    TEST_CHECK(data != NULL && !IS_ERR(data));
+    TEST_CHECK_EQ(EC_MBOX_TYPE_FOE, type);
+
+    slave.sii.mailbox_protocols = EC_MBOX_COE | EC_MBOX_EOE;
 
     /* Without the places (no mailbox found by the scan, or no memory):
      * as it always was, every reader sees the mailbox itself. */

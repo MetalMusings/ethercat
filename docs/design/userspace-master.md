@@ -566,7 +566,7 @@ reached OP; the CoE state machine failed on an Ethernet frame ("Received
 mailbox protocol 0x02 as response").
 
 Now a reader that fetches a mail of another reader puts it aside for it
-(`master/mailbox.c`, `ec_mbox_stash_t`, one per slave with a mailbox):
+(`master/mailbox.c`, `ec_mbox_stash_t`, one per slave whose SII lists EoE):
 
 - **Readers** (`ec_mbox_user_t`): CoE, FoE, SoE, VoE, EoE frames (the
   handler: frame type 0) and EoE parameters (the EoE state machine:
@@ -590,6 +590,13 @@ Now a reader that fetches a mail of another reader puts it aside for it
 - A request (`ec_slave_mbox_prepare_send()`, and the EoE parameter request)
   first forgets a mail put aside for its reader: it would be taken as the
   answer. A CoE emergency message stays.
+
+A slave without EoE gets no places, and its mailbox is read exactly as
+before: its protocols take turns in the master's thread, and nothing new
+runs for it. (A VoE handler beside CoE on such a slave is not kept apart;
+it never was.) In the same way `ecrt_master_send()` looks at the external
+queue only when the EoE thread runs in the cyclic frames (`eoe_cyclic`): a
+bus without EoE slaves has no added work in the application's cycle.
 
 The places are lock-free (EMPTY/WRITING/FULL/READING by compare-and-swap),
 since the readers run in three threads, one of them realtime; nothing waits

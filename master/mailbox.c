@@ -106,7 +106,12 @@ uint8_t *ec_slave_mbox_prepare_send(const ec_slave_t *slave, /**< slave */
 /** Allocates the places for mails put aside. Not in real-time context:
  * called by the bus scan when the slave is known to have a mailbox.
  *
- * \return 0 on success, else < 0
+ * Only a slave with EoE gets them: its EoE handler reads the mailbox from
+ * another thread than the master's state machines, all the time. The other
+ * protocols take turns in the master's thread, and such a slave's mailbox
+ * is read as it always was (no places: every function here falls back).
+ *
+ * \return 0 on success or if the slave needs none, else < 0
  */
 int ec_slave_mbox_stash_alloc(ec_slave_t *slave /**< slave */)
 {
@@ -114,6 +119,9 @@ int ec_slave_mbox_stash_alloc(ec_slave_t *slave /**< slave */)
     unsigned int i;
 
     if (slave->mbox_stash) {
+        return 0;
+    }
+    if (!(slave->sii.mailbox_protocols & EC_MBOX_EOE)) {
         return 0;
     }
 
