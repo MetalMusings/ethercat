@@ -401,7 +401,11 @@ int ec_netif_rx(ec_skb_t *skb)
      */
     ret = write(dev->fd, skb->head, skb->tail - skb->head);
     if (ret < 0) {
-        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+        if (errno == EIO) {
+            /* The interface is down (nobody set it up yet): the frame
+             * is dropped, as by any network card without a carrier. */
+            dev->stats.rx_dropped++;
+        } else if (errno != EAGAIN && errno != EWOULDBLOCK) {
             fprintf(stderr, "EoE: TAP write error on %s: %s\n",
                     dev->name, strerror(errno));
             dev->stats.rx_errors++;
