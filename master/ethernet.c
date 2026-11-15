@@ -271,6 +271,7 @@ int ec_eoe_send(ec_eoe_t *eoe /**< EoE handler */)
     eoe->queue_datagram = 1;
 
     eoe->tx_offset += current_size;
+    eoe->tx_last_size = current_size;
     eoe->tx_fragment_number++;
     return 0;
 }
@@ -611,6 +612,19 @@ void ec_eoe_state_tx_start(ec_eoe_t *eoe /**< EoE handler */)
         return;
     }
 
+    if (eoe->tx_frame) {
+        // back from reading the slave's mail (see ec_eoe_state_tx_sent()):
+        // the fragment the slave did not take is sent again
+        if (ec_eoe_send(eoe)) {
+            ec_eoe_tx_frame_drop(eoe);
+            eoe->stats.tx_errors++;
+            eoe->state = ec_eoe_state_rx_start;
+            return;
+        }
+        eoe->state = ec_eoe_state_tx_sent;
+        return;
+    }
+
     ec_eoe_netdev_tx_lock(eoe->dev);
 
     if (!eoe->tx_queued_frames || list_empty(&eoe->tx_queue)) {
@@ -694,8 +708,15 @@ void ec_eoe_state_tx_sent(ec_eoe_t *eoe /**< EoE handler */)
 
     if (eoe->datagram.working_counter != 1) {
         if (eoe->tries) {
-            eoe->tries--; // try again
-            eoe->queue_datagram = 1;
+            // The slave's receive mailbox still holds the mail before this
+            // one. A slave may leave it there until its own mail has been
+            // read (SOES does): asking again alone would wait for nothing.
+            // Read the slave's mail first, then send this fragment again
+            // (ec_eoe_state_tx_start()).
+            eoe->tries--;
+            eoe->tx_offset -= eoe->tx_last_size;
+            eoe->tx_fragment_number--;
+            eoe->state = ec_eoe_state_rx_start;
         } else {
             eoe->stats.tx_errors++;
 #if EOE_DEBUG_LEVEL >= 1
@@ -720,6 +741,7 @@ void ec_eoe_state_tx_sent(ec_eoe_t *eoe /**< EoE handler */)
         eoe->state = ec_eoe_state_rx_start;
     }
     else { // send next fragment
+        eoe->tries = EC_EOE_TRIES;
         if (ec_eoe_send(eoe)) {
             ec_eoe_buf_free(eoe->tx_frame->skb);
             ec_eoe_frame_free(eoe->tx_frame);

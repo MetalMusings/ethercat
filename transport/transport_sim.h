@@ -138,10 +138,13 @@ int sim_bus_mbox_preload(sim_bus_t *bus, unsigned int pos, uint8_t type,
  * (SM1 "mailbox full" status), or -1 for an invalid position. */
 int sim_bus_mbox_full(sim_bus_t *bus, unsigned int pos);
 
-/** Make slave \a pos stop (\a deaf nonzero) or start again taking mail:
- * while deaf, a write to its receive mailbox gets no working counter, as
- * from a slave whose firmware does not empty the mailbox.  Returns 0 on
- * success. */
+/** How slave \a pos takes mail. \a deaf 0: always (the default).
+ * 1: never; a write to its receive mailbox gets no working counter, as
+ * from a slave whose firmware does not empty the mailbox. 2: not while
+ * its own mail waits to be read (send mailbox full), as the SOES slave
+ * stack does; the EoE echo of a frame then comes when the next frame
+ * begins, so that it waits while that frame's later fragments arrive.
+ * Returns 0 on success. */
 int sim_bus_mbox_deaf(sim_bus_t *bus, unsigned int pos, int deaf);
 
 /** Create or update an object-dictionary entry of slave \a pos (CoE

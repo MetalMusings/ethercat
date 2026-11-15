@@ -58,7 +58,8 @@ static const sim_slave_identity_t identities[1] = {
       .sm2_phys = 0x1100, .sm2_len = 8,
       .sm3_phys = 0x1400, .sm3_len = 8,
       .mbox_out_phys = 0x1000, .mbox_out_len = 128,
-      .mbox_in_phys = 0x1080, .mbox_in_len = 128,
+      .mbox_in_phys = 0x1800, .mbox_in_len = 256, /* an echo of two
+                                                      fragments fits */
       .eoe = 1 },
 };
 
@@ -294,6 +295,48 @@ int main(int argc, char **argv)
         }
     }
     TEST_CHECK(reached);
+
+    /* A slave that takes no mail while its own waits to be read (SOES),
+     * and whose answer comes while the master is in the middle of the
+     * next frame: that frame's second fragment is not taken until the
+     * answer has been read. Every frame of a burst must still come back;
+     * the master once asked a hundred times and dropped the frame. */
+    TEST_CHECK_EQ(0, sim_bus_mbox_deaf(bus, 0, 2));
+    {
+        uint8_t big[150]; /* two fragments in a 128 byte mailbox */
+        unsigned int i, got = 0;
+
+        memset(big, 0x5A, sizeof(big));
+        memcpy(big, frame, 14);
+        memcpy(big + 14, "EoE-burst-echo-test--", 21);
+        /* the echo of frame i comes when frame i + 1 begins: one more
+         * frame than echoes awaited */
+        for (i = 0; i < 11; i++) {
+            big[40] = (uint8_t) i;
+            TEST_CHECK_EQ((int) sizeof(big),
+                    (int) sendto(sock, big, sizeof(big), 0,
+                        (struct sockaddr *) &sll, sizeof(sll)));
+        }
+        for (cycles = 0; cycles < MAX_CYCLES && got < 10; cycles++) {
+            struct sockaddr_ll from;
+            socklen_t fromlen = sizeof(from);
+            ssize_t n;
+
+            cycle(master, domain);
+            while ((n = recvfrom(sock, rbuf, sizeof(rbuf), MSG_DONTWAIT,
+                            (struct sockaddr *) &from, &fromlen)) > 0) {
+                if (from.sll_pkttype != PACKET_OUTGOING
+                        && n >= (ssize_t) sizeof(big)
+                        && !memcmp(rbuf + 14, "EoE-burst-echo-test--", 21)
+                        && rbuf[40] == got && rbuf[149] == 0x5A) {
+                    got++;
+                }
+                fromlen = sizeof(from);
+            }
+        }
+        TEST_CHECK_EQ(10, (int) got);
+    }
+    TEST_CHECK_EQ(0, sim_bus_mbox_deaf(bus, 0, 0));
 
     /* A slave that stops taking mail: every frame is given up after its
      * tries.  More frames than the buffer pool holds must not use the

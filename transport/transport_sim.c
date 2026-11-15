@@ -102,6 +102,8 @@ typedef struct {
     uint8_t eoe_frame[1600]; /**< EoE frame reassembly buffer. */
     size_t eoe_len; /**< Bytes assembled so far. */
     uint8_t mbox_deaf; /**< Does not take mail (see sim_bus_mbox_deaf). */
+    uint8_t eoe_late[4 + 1600]; /**< Echo held back (mbox_deaf 2). */
+    uint16_t eoe_late_len; /**< Its length, 0: none. */
     unsigned int sii_lost_scans; /**< Lose the replies to SII accesses during
                                    the first this many bus scans (see
                                    sim_bus_lose_sii). */
@@ -702,6 +704,12 @@ static void sim_eoe_request(sim_slave_t *slave, const uint8_t *data,
     pos = frag ? (size_t) off32 * 32 : 0; /* fragment 0: field = size */
     if (frag == 0) {
         slave->eoe_len = 0;
+        if (slave->eoe_late_len) {
+            /* the echo held back comes now, in the middle of this frame */
+            sim_mbox_respond_type(slave, 0x02, slave->eoe_late,
+                    slave->eoe_late_len);
+            slave->eoe_late_len = 0;
+        }
     }
     if (pos + payload_len > sizeof(slave->eoe_frame)) {
         return;
@@ -726,8 +734,14 @@ static void sim_eoe_request(sim_slave_t *slave, const uint8_t *data,
         sim_wr16(rsp + 2, (uint16_t) ((0 & 0x3F) | ((size_blocks & 0x3F) << 6)
                     | ((frame_no & 0x0F) << 12)));
         memcpy(rsp + 4, slave->eoe_frame, slave->eoe_len);
-        sim_mbox_respond_type(slave, 0x02, rsp,
-                (uint16_t) (4 + slave->eoe_len));
+        if (slave->mbox_deaf == 2) {
+            /* answer when the next frame begins */
+            memcpy(slave->eoe_late, rsp, 4 + slave->eoe_len);
+            slave->eoe_late_len = (uint16_t) (4 + slave->eoe_len);
+        } else {
+            sim_mbox_respond_type(slave, 0x02, rsp,
+                    (uint16_t) (4 + slave->eoe_len));
+        }
         slave->eoe_len = 0;
     }
 }
@@ -835,8 +849,10 @@ static unsigned int sim_slave_process(sim_slave_t *slave, uint8_t cmd,
         case 0x08: /* BWR */
             /* A receive mailbox that still holds the last mail does not
              * take another one: no working counter. */
-            if (slave->mbox_deaf && slave->mbox_out_len
-                    && adr == slave->mbox_out_phys) {
+            if (slave->mbox_out_len && adr == slave->mbox_out_phys
+                    && (slave->mbox_deaf == 1
+                        || (slave->mbox_deaf == 2
+                            && (slave->regs[0x080D] & 0x08)))) {
                 return 0;
             }
             memcpy(slave->regs + adr, data, len);
@@ -1727,7 +1743,7 @@ int sim_bus_mbox_deaf(sim_bus_t *bus, unsigned int pos, int deaf)
     }
 
     pthread_mutex_lock(&bus->lock);
-    bus->slaves[pos].mbox_deaf = deaf ? 1 : 0;
+    bus->slaves[pos].mbox_deaf = (uint8_t) deaf;
     pthread_mutex_unlock(&bus->lock);
     return 0;
 }
