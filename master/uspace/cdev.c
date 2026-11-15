@@ -56,6 +56,7 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
+#include <stddef.h>
 
 #ifndef UNIX_PATH_MAX
 #define UNIX_PATH_MAX (sizeof(((struct sockaddr_un *)0)->sun_path))
@@ -344,6 +345,27 @@ _Static_assert(sizeof(ec_ioctl_eoe_handler_t) == sizeof(ec_tool_eoe_handler_t),
         "ec_ioctl_eoe_handler_t and ec_tool_eoe_handler_t differ");
 _Static_assert(sizeof(ec_ioctl_eoe_ip_t) == sizeof(ec_tool_eoe_ip_t),
         "ec_ioctl_eoe_ip_t and ec_tool_eoe_ip_t differ");
+/* Equal sizes are not enough: these two once differed by one field and
+ * still had the same size, and the "included" flags arrived two bytes off. */
+#define EOE_IP_SAME(field) \
+    _Static_assert(offsetof(ec_ioctl_eoe_ip_t, field) == \
+            offsetof(ec_tool_eoe_ip_t, field), \
+            "ec_ioctl_eoe_ip_t and ec_tool_eoe_ip_t differ at " #field)
+EOE_IP_SAME(slave_position);
+EOE_IP_SAME(mac_address_included);
+EOE_IP_SAME(ip_address_included);
+EOE_IP_SAME(subnet_mask_included);
+EOE_IP_SAME(gateway_included);
+EOE_IP_SAME(dns_included);
+EOE_IP_SAME(name_included);
+EOE_IP_SAME(mac_address);
+EOE_IP_SAME(ip_address);
+EOE_IP_SAME(subnet_mask);
+EOE_IP_SAME(gateway);
+EOE_IP_SAME(dns);
+EOE_IP_SAME(name);
+EOE_IP_SAME(result);
+#undef EOE_IP_SAME
 
 /** EC_CMD_MODULE — return version magic and master count. */
 static int dispatch_module(int fd, ec_master_t *master,

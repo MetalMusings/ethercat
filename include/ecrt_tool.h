@@ -549,6 +549,8 @@ typedef struct {
 typedef struct {
     // inputs
     uint16_t slave_position;
+    uint16_t config_index; /**< Not used here; keeps the layout that the
+                             tool sends (ec_ioctl_eoe_ip_t). */
     uint8_t mac_address_included;
     uint8_t ip_address_included;
     uint8_t subnet_mask_included;

@@ -250,8 +250,6 @@ int ec_fsm_eoe_prepare_set(
         ec_print_data(data, cur - data);
     }
 
-    fsm->request->time_sent = ec_current_time();
-
     // an answer put aside earlier is not the answer to this request
     ec_slave_mbox_stash_drop(slave, EC_MBOX_USER_EOE_PARAM);
 
@@ -276,6 +274,10 @@ void ec_fsm_eoe_set_ip_start(
         fsm->state = ec_fsm_eoe_error;
         return;
     }
+
+    // The response timeout runs from the first try: a slave that never
+    // takes the request (working counter 0) must not be asked forever.
+    fsm->request->time_sent = ec_current_time();
 
     if (ec_fsm_eoe_prepare_set(fsm, datagram)) {
         fsm->state = ec_fsm_eoe_error;
