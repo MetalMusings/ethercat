@@ -360,7 +360,9 @@ void ec_eoe_state_rx_start(ec_eoe_t *eoe /**< EoE handler */)
  */
 void ec_eoe_state_rx_check(ec_eoe_t *eoe /**< EoE handler */)
 {
-    if (eoe->datagram.state != EC_DATAGRAM_RECEIVED) {
+    // no answer from the slave (working counter) is no mailbox state
+    if (eoe->datagram.state != EC_DATAGRAM_RECEIVED
+            || eoe->datagram.working_counter != 1) {
         eoe->stats.rx_errors++;
 #if EOE_DEBUG_LEVEL >= 1
         EC_SLAVE_WARN(eoe->slave, "Failed to receive mbox"
@@ -370,14 +372,14 @@ void ec_eoe_state_rx_check(ec_eoe_t *eoe /**< EoE handler */)
         return;
     }
 
-    if (!ec_slave_mbox_check(&eoe->datagram)) {
+    if (!ec_slave_mbox_check(eoe->slave, &eoe->datagram, EC_MBOX_USER_EOE_FRAME)) {
         eoe->rx_idle = 1;
         eoe->state = ec_eoe_state_tx_start;
         return;
     }
 
     eoe->rx_idle = 0;
-    ec_slave_mbox_prepare_fetch(eoe->slave, &eoe->datagram);
+    ec_slave_mbox_prepare_fetch(eoe->slave, &eoe->datagram, EC_MBOX_USER_EOE_FRAME);
     eoe->queue_datagram = 1;
     eoe->state = ec_eoe_state_rx_fetch;
 }
@@ -402,7 +404,9 @@ void ec_eoe_state_rx_fetch(ec_eoe_t *eoe /**< EoE handler */)
     unsigned int i;
 #endif
 
-    if (eoe->datagram.state != EC_DATAGRAM_RECEIVED) {
+    // an empty mailbox does not answer (working counter): no mail
+    if (eoe->datagram.state != EC_DATAGRAM_RECEIVED
+            || eoe->datagram.working_counter != 1) {
         eoe->stats.rx_errors++;
 #if EOE_DEBUG_LEVEL >= 1
         EC_SLAVE_WARN(eoe->slave, "Failed to receive mbox"
@@ -412,8 +416,14 @@ void ec_eoe_state_rx_fetch(ec_eoe_t *eoe /**< EoE handler */)
         return;
     }
 
-    data = ec_slave_mbox_fetch(eoe->slave, &eoe->datagram,
+    data = ec_slave_mbox_fetch(eoe->slave, &eoe->datagram, EC_MBOX_USER_EOE_FRAME,
             &mbox_prot, &rec_size);
+    if (!data) {
+        // a mail for another reader of the mailbox was put aside
+        eoe->state = ec_eoe_state_tx_start;
+        return;
+    }
+
     if (IS_ERR(data)) {
         eoe->stats.rx_errors++;
 #if EOE_DEBUG_LEVEL >= 1

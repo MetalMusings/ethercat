@@ -163,6 +163,8 @@ typedef struct {
 
 /****************************************************************************/
 
+typedef struct ec_mbox_stash ec_mbox_stash_t; /**< \see ec_mbox_stash */
+
 /** EtherCAT slave.
  */
 struct ec_slave
@@ -198,6 +200,9 @@ struct ec_slave
     uint16_t configured_tx_mailbox_offset; /**< Configured send mailbox
                                              offset. */
     uint16_t configured_tx_mailbox_size; /**< Configured send mailbox size. */
+    ec_mbox_stash_t *mbox_stash; /**< Mails fetched by one reader of the
+                                   mailbox for another (mailbox.h), or
+                                   NULL. */
 
     // base data
     uint8_t base_type; /**< Slave type. */

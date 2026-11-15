@@ -64,6 +64,8 @@
 #define SIM_ECAT_HDR_LEN 2
 #define SIM_DGRAM_HDR_LEN 10
 #define SIM_RXQ_LEN 32
+#define SIM_MBOX_WAIT 16 /* responses waiting behind the send mailbox */
+#define SIM_MBOX_WAIT_SIZE 1500
 
 #define SIM_OD_ENTRIES 32
 #define SIM_OD_DATA_SIZE 64
@@ -83,6 +85,11 @@ typedef struct {
     uint16_t mbox_out_len;
     uint16_t mbox_in_phys;  /**< Send mailbox (slave -> master). */
     uint16_t mbox_in_len;
+    /* Responses waiting for the send mailbox to be read (oldest first). */
+    uint8_t mbox_wait[SIM_MBOX_WAIT][SIM_MBOX_WAIT_SIZE];
+    uint16_t mbox_wait_len[SIM_MBOX_WAIT];
+    uint8_t mbox_wait_type[SIM_MBOX_WAIT];
+    unsigned int mbox_wait_first, mbox_wait_count;
     uint16_t sm2_phys;      /**< Output process-data SM (master -> slave). */
     uint16_t sm2_len;
     uint16_t sm3_phys;      /**< Input process-data SM (slave -> master). */
@@ -270,6 +277,8 @@ static void sim_slave_init_regs(sim_slave_t *slave, unsigned int pos,
     uint8_t *r = slave->regs;
 
     memset(r, 0, SIM_REG_SIZE);
+    slave->mbox_wait_first = 0;
+    slave->mbox_wait_count = 0;
 
     /* Base information block. */
     r[0x0000] = 0x11; /* type */
@@ -333,25 +342,12 @@ static sim_od_entry_t *sim_od_find(sim_slave_t *slave, uint16_t index,
     return NULL;
 }
 
-/** Write a mailbox response into the send mailbox and raise the SM1
- * "mailbox full" status bit (0x080D bit 3, polled via FPRD 0x808). */
-static void sim_mbox_respond_type(sim_slave_t *slave, uint8_t type,
+/** Put a message into the (empty) send mailbox and raise the SM1 "mailbox
+ * full" status bit (0x080D bit 3, polled via FPRD 0x808). */
+static void sim_mbox_put(sim_slave_t *slave, uint8_t type,
         const uint8_t *payload, uint16_t len)
 {
     uint8_t *m = slave->regs + slave->mbox_in_phys;
-
-    if ((size_t) slave->mbox_in_phys + 6 + len > SIM_REG_SIZE
-            || 6 + len > slave->mbox_in_len) {
-        return;
-    }
-
-    /* The send mailbox holds one message: a slave cannot queue a second
-     * response until the master has read the first.  Dropping the new one
-     * rather than overwriting is what lets a stale response actually reach
-     * the next master, as it does on real hardware. */
-    if (slave->regs[0x080D] & 0x08) {
-        return;
-    }
 
     sim_wr16(m, len); /* mailbox service data length */
     memcpy(m + 2, slave->regs + 0x0010, 2); /* station address */
@@ -360,6 +356,55 @@ static void sim_mbox_respond_type(sim_slave_t *slave, uint8_t type,
     memcpy(m + 6, payload, len);
 
     slave->regs[0x080D] |= 0x08;
+}
+
+/** Send a mailbox response: into the send mailbox, or, while the master
+ * has not read the message there, into the slave's queue behind it. */
+static void sim_mbox_respond_type(sim_slave_t *slave, uint8_t type,
+        const uint8_t *payload, uint16_t len)
+{
+    if ((size_t) slave->mbox_in_phys + 6 + len > SIM_REG_SIZE
+            || 6 + len > slave->mbox_in_len) {
+        return;
+    }
+
+    /* The send mailbox holds one message. A slave's mailbox stack keeps
+     * the next ones until the master has read it, in their order (a CoE
+     * response behind an Ethernet frame, for example): the message in the
+     * mailbox is never overwritten, which is what lets a stale response
+     * reach the next master, as it does on real hardware. */
+    if (slave->regs[0x080D] & 0x08) {
+        unsigned int at;
+
+        if (slave->mbox_wait_count >= SIM_MBOX_WAIT
+                || len > SIM_MBOX_WAIT_SIZE) {
+            return; /* out of buffers: dropped */
+        }
+        at = (slave->mbox_wait_first + slave->mbox_wait_count)
+            % SIM_MBOX_WAIT;
+        memcpy(slave->mbox_wait[at], payload, len);
+        slave->mbox_wait_len[at] = len;
+        slave->mbox_wait_type[at] = type;
+        slave->mbox_wait_count++;
+        return;
+    }
+
+    sim_mbox_put(slave, type, payload, len);
+}
+
+/** The master read the send mailbox: it is empty, and takes the next
+ * waiting message. */
+static void sim_mbox_was_read(sim_slave_t *slave)
+{
+    slave->regs[0x080D] &= (uint8_t) ~0x08;
+    if (slave->mbox_wait_count) {
+        unsigned int at = slave->mbox_wait_first;
+
+        sim_mbox_put(slave, slave->mbox_wait_type[at], slave->mbox_wait[at],
+                slave->mbox_wait_len[at]);
+        slave->mbox_wait_first = (at + 1) % SIM_MBOX_WAIT;
+        slave->mbox_wait_count--;
+    }
 }
 
 /** CoE response convenience wrapper. */
@@ -703,14 +748,10 @@ static void sim_mbox_request(sim_slave_t *slave)
         sim_eoe_request(slave, m + 6, dlen);
     } else {
         /* Unsupported protocol: mailbox error reply (type 0). */
-        uint8_t *r = slave->regs + slave->mbox_in_phys;
-        sim_wr16(r, 4);
-        memcpy(r + 2, slave->regs + 0x0010, 2);
-        r[4] = 0x00;
-        r[5] = 0x00; /* mailbox error */
-        sim_wr16(r + 6, 0x0001); /* MBXERR command */
-        sim_wr16(r + 8, 0x0001); /* code: syntax error */
-        slave->regs[0x080D] |= 0x08;
+        uint8_t rsp[4];
+        sim_wr16(rsp, 0x0001); /* MBXERR command */
+        sim_wr16(rsp + 2, 0x0001); /* code: syntax error */
+        sim_mbox_respond_type(slave, 0x00, rsp, 4);
     }
 }
 
@@ -768,11 +809,17 @@ static unsigned int sim_slave_process(sim_slave_t *slave, uint8_t cmd,
     switch (cmd) {
         case 0x01: /* APRD */
         case 0x04: /* FPRD */
-            memcpy(data, slave->regs + adr, len);
-            /* Fetching the send mailbox empties it. */
+            /* An empty send mailbox does not answer (a sync manager in
+             * mailbox mode); fetching a full one empties it. */
             if (slave->mbox_in_len && adr == slave->mbox_in_phys) {
-                slave->regs[0x080D] &= (uint8_t) ~0x08;
+                if (!(slave->regs[0x080D] & 0x08)) {
+                    return 0;
+                }
+                memcpy(data, slave->regs + adr, len);
+                sim_mbox_was_read(slave);
+                return 1;
             }
+            memcpy(data, slave->regs + adr, len);
             return 1;
         case 0x07: /* BRD: bitwise OR of all slaves' data */
             {

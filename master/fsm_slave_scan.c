@@ -724,6 +724,11 @@ void ec_fsm_slave_scan_state_sii_data(ec_fsm_slave_scan_t *fsm
     slave->sii.mailbox_protocols =
         EC_READ_U16(slave->sii_words + 0x001C);
     if (slave->sii.mailbox_protocols) {
+        // If this fails, the readers of the mailbox are not kept apart
+        // (as it was before mails were put aside).
+        ec_slave_mbox_stash_alloc(slave);
+    }
+    if (slave->sii.mailbox_protocols) {
         uint16_t all = EC_MBOX_AOE | EC_MBOX_COE | EC_MBOX_FOE |
             EC_MBOX_SOE | EC_MBOX_VOE;
         if ((slave->sii.mailbox_protocols & all) &&
@@ -1112,7 +1117,7 @@ void ec_fsm_slave_scan_state_mbox_drain_check(
         return;
     }
 
-    if (!ec_slave_mbox_check(datagram)) {
+    if (!ec_slave_mbox_check(slave, datagram, EC_MBOX_USER_ANY)) {
         // mailbox empty — nothing stale to discard
         ec_fsm_slave_scan_enter_pdos(fsm);
         return;
@@ -1127,7 +1132,7 @@ void ec_fsm_slave_scan_state_mbox_drain_check(
     }
     fsm->mbox_drain_count--;
 
-    ec_slave_mbox_prepare_fetch(slave, datagram); // can not fail
+    ec_slave_mbox_prepare_fetch(slave, datagram, EC_MBOX_USER_ANY); // can not fail
     fsm->retries = EC_FSM_RETRIES;
     fsm->state = ec_fsm_slave_scan_state_mbox_drain_fetch;
 }

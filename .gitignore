@@ -83,5 +83,7 @@ tests/test_rt_pagefault
 master/uspace/ethercat-config.cmake
 tests/test_sim_eoe
 tests/test_sim_eoe_cyclic
+tests/test_sim_mbox_share
+tests/test_mbox_share
 *.tar.bz2
 *.tar.gz

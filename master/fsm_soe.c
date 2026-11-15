@@ -362,7 +362,7 @@ void ec_fsm_soe_read_check(
         return;
     }
 
-    if (!ec_slave_mbox_check(fsm->datagram)) {
+    if (!ec_slave_mbox_check(slave, fsm->datagram, EC_MBOX_USER_SOE)) {
         unsigned long diff_ms = ec_time_to_ms(
             fsm->datagram->time_received - fsm->time_start);
         if (diff_ms >= EC_SOE_RESPONSE_TIMEOUT) {
@@ -379,7 +379,7 @@ void ec_fsm_soe_read_check(
     }
 
     // Fetch response
-    ec_slave_mbox_prepare_fetch(slave, datagram); // can not fail.
+    ec_slave_mbox_prepare_fetch(slave, datagram, EC_MBOX_USER_SOE); // can not fail.
     fsm->retries = EC_FSM_RETRIES;
     fsm->state = ec_fsm_soe_read_response;
 }
@@ -401,7 +401,7 @@ void ec_fsm_soe_read_response(
     ec_soe_request_t *req = fsm->request;
 
     if (fsm->datagram->state == EC_DATAGRAM_TIMED_OUT && fsm->retries--) {
-        ec_slave_mbox_prepare_fetch(slave, datagram); // can not fail.
+        ec_slave_mbox_prepare_fetch(slave, datagram, EC_MBOX_USER_SOE); // can not fail.
         return;
     }
 
@@ -421,10 +421,18 @@ void ec_fsm_soe_read_response(
         return;
     }
 
-    data = ec_slave_mbox_fetch(slave, fsm->datagram, &mbox_prot, &rec_size);
+    data = ec_slave_mbox_fetch(slave, fsm->datagram, EC_MBOX_USER_SOE, &mbox_prot, &rec_size);
     if (IS_ERR(data)) {
         fsm->state = ec_fsm_soe_error;
         ec_fsm_soe_print_error(fsm);
+        return;
+    }
+
+    if (!data) {
+        // a mail for another protocol was put aside: check again
+        ec_slave_mbox_prepare_check(slave, datagram); // can not fail.
+        fsm->retries = EC_FSM_RETRIES;
+        fsm->state = ec_fsm_soe_read_check;
         return;
     }
 
@@ -688,7 +696,7 @@ void ec_fsm_soe_write_check(
         return;
     }
 
-    if (!ec_slave_mbox_check(fsm->datagram)) {
+    if (!ec_slave_mbox_check(slave, fsm->datagram, EC_MBOX_USER_SOE)) {
         unsigned long diff_ms = ec_time_to_ms(
             datagram->time_received - fsm->time_start);
         if (diff_ms >= EC_SOE_RESPONSE_TIMEOUT) {
@@ -705,7 +713,7 @@ void ec_fsm_soe_write_check(
     }
 
     // Fetch response
-    ec_slave_mbox_prepare_fetch(slave, datagram); // can not fail.
+    ec_slave_mbox_prepare_fetch(slave, datagram, EC_MBOX_USER_SOE); // can not fail.
     fsm->retries = EC_FSM_RETRIES;
     fsm->state = ec_fsm_soe_write_response;
 }
@@ -727,7 +735,7 @@ void ec_fsm_soe_write_response(
     size_t rec_size;
 
     if (fsm->datagram->state == EC_DATAGRAM_TIMED_OUT && fsm->retries--) {
-        ec_slave_mbox_prepare_fetch(slave, datagram); // can not fail.
+        ec_slave_mbox_prepare_fetch(slave, datagram, EC_MBOX_USER_SOE); // can not fail.
         return; // FIXME: request again?
     }
 
@@ -748,10 +756,18 @@ void ec_fsm_soe_write_response(
         return;
     }
 
-    data = ec_slave_mbox_fetch(slave, fsm->datagram, &mbox_prot, &rec_size);
+    data = ec_slave_mbox_fetch(slave, fsm->datagram, EC_MBOX_USER_SOE, &mbox_prot, &rec_size);
     if (IS_ERR(data)) {
         fsm->state = ec_fsm_soe_error;
         ec_fsm_soe_print_error(fsm);
+        return;
+    }
+
+    if (!data) {
+        // a mail for another protocol was put aside: check again
+        ec_slave_mbox_prepare_check(slave, datagram); // can not fail.
+        fsm->retries = EC_FSM_RETRIES;
+        fsm->state = ec_fsm_soe_write_check;
         return;
     }
 

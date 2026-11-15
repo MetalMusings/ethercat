@@ -355,7 +355,7 @@ void ec_fsm_foe_state_ack_check(
         return;
     }
 
-    if (!ec_slave_mbox_check(fsm->datagram)) {
+    if (!ec_slave_mbox_check(slave, fsm->datagram, EC_MBOX_USER_FOE)) {
         // slave did not put anything in the mailbox yet
         unsigned long diff_ms = ec_time_to_ms(fsm->datagram->time_received -
                 fsm->time_start);
@@ -371,7 +371,7 @@ void ec_fsm_foe_state_ack_check(
     }
 
     // Fetch response
-    ec_slave_mbox_prepare_fetch(slave, datagram); // can not fail.
+    ec_slave_mbox_prepare_fetch(slave, datagram, EC_MBOX_USER_FOE); // can not fail.
 
     fsm->retries = EC_FSM_RETRIES;
     fsm->state = ec_fsm_foe_state_ack_read;
@@ -409,9 +409,17 @@ void ec_fsm_foe_state_ack_read(
         return;
     }
 
-    data = ec_slave_mbox_fetch(slave, fsm->datagram, &mbox_prot, &rec_size);
+    data = ec_slave_mbox_fetch(slave, fsm->datagram, EC_MBOX_USER_FOE, &mbox_prot, &rec_size);
     if (IS_ERR(data)) {
         ec_foe_set_tx_error(fsm, FOE_PROT_ERROR);
+        return;
+    }
+
+    if (!data) {
+        // a mail for another protocol was put aside: check again
+        ec_slave_mbox_prepare_check(slave, datagram); // can not fail.
+        fsm->retries = EC_FSM_RETRIES;
+        fsm->state = ec_fsm_foe_state_ack_check;
         return;
     }
 
@@ -695,7 +703,7 @@ void ec_fsm_foe_state_data_check(
         return;
     }
 
-    if (!ec_slave_mbox_check(fsm->datagram)) {
+    if (!ec_slave_mbox_check(slave, fsm->datagram, EC_MBOX_USER_FOE)) {
         unsigned long diff_ms = ec_time_to_ms(fsm->datagram->time_received -
                 fsm->time_start);
         if (diff_ms >= EC_FSM_FOE_TIMEOUT) {
@@ -710,7 +718,7 @@ void ec_fsm_foe_state_data_check(
     }
 
     // Fetch response
-    ec_slave_mbox_prepare_fetch(slave, datagram); // can not fail.
+    ec_slave_mbox_prepare_fetch(slave, datagram, EC_MBOX_USER_FOE); // can not fail.
 
     fsm->retries = EC_FSM_RETRIES;
     fsm->state = ec_fsm_foe_state_data_read;
@@ -748,9 +756,17 @@ void ec_fsm_foe_state_data_read(
         return;
     }
 
-    data = ec_slave_mbox_fetch(slave, fsm->datagram, &mbox_prot, &rec_size);
+    data = ec_slave_mbox_fetch(slave, fsm->datagram, EC_MBOX_USER_FOE, &mbox_prot, &rec_size);
     if (IS_ERR(data)) {
         ec_foe_set_rx_error(fsm, FOE_MBOX_FETCH_ERROR);
+        return;
+    }
+
+    if (!data) {
+        // a mail for another protocol was put aside: check again
+        ec_slave_mbox_prepare_check(slave, datagram); // can not fail.
+        fsm->retries = EC_FSM_RETRIES;
+        fsm->state = ec_fsm_foe_state_data_check;
         return;
     }
 

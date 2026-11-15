@@ -252,6 +252,9 @@ int ec_fsm_eoe_prepare_set(
 
     fsm->request->time_sent = ec_current_time();
 
+    // an answer put aside earlier is not the answer to this request
+    ec_slave_mbox_stash_drop(slave, EC_MBOX_USER_EOE_PARAM);
+
     return 0;
 }
 
@@ -369,7 +372,7 @@ void ec_fsm_eoe_set_ip_check(
         return;
     }
 
-    if (!ec_slave_mbox_check(fsm->datagram)) {
+    if (!ec_slave_mbox_check(slave, fsm->datagram, EC_MBOX_USER_EOE_PARAM)) {
         unsigned long diff_ms = ec_time_to_ms(
             fsm->datagram->time_received - fsm->time_start);
         if (diff_ms >= EC_EOE_RESPONSE_TIMEOUT) {
@@ -385,7 +388,7 @@ void ec_fsm_eoe_set_ip_check(
     }
 
     // fetch response
-    ec_slave_mbox_prepare_fetch(slave, datagram); // can not fail.
+    ec_slave_mbox_prepare_fetch(slave, datagram, EC_MBOX_USER_EOE_PARAM); // can not fail.
     fsm->retries = EC_FSM_RETRIES;
     fsm->state = ec_fsm_eoe_set_ip_response;
 }
@@ -406,7 +409,7 @@ void ec_fsm_eoe_set_ip_response(
     ec_eoe_request_t *req = fsm->request;
 
     if (fsm->datagram->state == EC_DATAGRAM_TIMED_OUT && fsm->retries--) {
-        ec_slave_mbox_prepare_fetch(slave, datagram); // can not fail.
+        ec_slave_mbox_prepare_fetch(slave, datagram, EC_MBOX_USER_EOE_PARAM); // can not fail.
         return;
     }
 
@@ -424,9 +427,17 @@ void ec_fsm_eoe_set_ip_response(
         return;
     }
 
-    data = ec_slave_mbox_fetch(slave, fsm->datagram, &mbox_prot, &rec_size);
+    data = ec_slave_mbox_fetch(slave, fsm->datagram, EC_MBOX_USER_EOE_PARAM, &mbox_prot, &rec_size);
     if (IS_ERR(data)) {
         fsm->state = ec_fsm_eoe_error;
+        return;
+    }
+
+    if (!data) {
+        // a mail for another reader was put aside: check again
+        ec_slave_mbox_prepare_check(slave, datagram); // can not fail.
+        fsm->retries = EC_FSM_RETRIES;
+        fsm->state = ec_fsm_eoe_set_ip_check;
         return;
     }
 

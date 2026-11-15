@@ -35,6 +35,7 @@
 #include "slave_config.h"
 
 #include "slave.h"
+#include "mailbox.h"
 
 /****************************************************************************/
 
@@ -84,6 +85,7 @@ void ec_slave_init(
     slave->configured_rx_mailbox_size = 0x0000;
     slave->configured_tx_mailbox_offset = 0x0000;
     slave->configured_tx_mailbox_size = 0x0000;
+    slave->mbox_stash = NULL;
 
     slave->base_type = 0;
     slave->base_revision = 0;
@@ -245,6 +247,7 @@ void ec_slave_clear(ec_slave_t *slave /**< EtherCAT slave */)
 
     // free all sync managers
     ec_slave_clear_sync_managers(slave);
+    ec_slave_mbox_stash_free(slave);
 
     // free all SII PDOs
     list_for_each_entry_safe(pdo, next_pdo, &slave->sii.pdos, list) {

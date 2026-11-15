@@ -505,7 +505,7 @@ void ec_fsm_coe_dict_check(
         return;
     }
 
-    if (!ec_slave_mbox_check(fsm->datagram)) {
+    if (!ec_slave_mbox_check(slave, fsm->datagram, EC_MBOX_USER_COE)) {
         unsigned long diff_ms = ec_time_to_ms(
             fsm->datagram->time_received - fsm->time_start);
         if (diff_ms >= EC_FSM_COE_DICT_TIMEOUT) {
@@ -521,7 +521,7 @@ void ec_fsm_coe_dict_check(
     }
 
     // Fetch response
-    ec_slave_mbox_prepare_fetch(slave, datagram); // can not fail.
+    ec_slave_mbox_prepare_fetch(slave, datagram, EC_MBOX_USER_COE); // can not fail.
     fsm->retries = EC_FSM_RETRIES;
     fsm->state = ec_fsm_coe_dict_response;
 }
@@ -619,7 +619,7 @@ void ec_fsm_coe_dict_response(
     size_t index_list_offset;
 
     if (fsm->datagram->state == EC_DATAGRAM_TIMED_OUT && fsm->retries--) {
-        ec_slave_mbox_prepare_fetch(slave, datagram); // can not fail.
+        ec_slave_mbox_prepare_fetch(slave, datagram, EC_MBOX_USER_COE); // can not fail.
         return;
     }
 
@@ -638,9 +638,17 @@ void ec_fsm_coe_dict_response(
         return;
     }
 
-    data = ec_slave_mbox_fetch(slave, fsm->datagram, &mbox_prot, &rec_size);
+    data = ec_slave_mbox_fetch(slave, fsm->datagram, EC_MBOX_USER_COE, &mbox_prot, &rec_size);
     if (IS_ERR(data)) {
         fsm->state = ec_fsm_coe_error;
+        return;
+    }
+
+    if (!data) {
+        // a mail for another protocol was put aside: check again
+        ec_slave_mbox_prepare_check(slave, datagram); // can not fail.
+        fsm->retries = EC_FSM_RETRIES;
+        fsm->state = ec_fsm_coe_dict_check;
         return;
     }
 
@@ -829,7 +837,7 @@ void ec_fsm_coe_dict_desc_check(
         return;
     }
 
-    if (!ec_slave_mbox_check(fsm->datagram)) {
+    if (!ec_slave_mbox_check(slave, fsm->datagram, EC_MBOX_USER_COE)) {
         unsigned long diff_ms = ec_time_to_ms(
             fsm->datagram->time_received - fsm->time_start);
         if (diff_ms >= EC_FSM_COE_DICT_TIMEOUT) {
@@ -846,7 +854,7 @@ void ec_fsm_coe_dict_desc_check(
     }
 
     // Fetch response
-    ec_slave_mbox_prepare_fetch(slave, datagram); // can not fail.
+    ec_slave_mbox_prepare_fetch(slave, datagram, EC_MBOX_USER_COE); // can not fail.
     fsm->retries = EC_FSM_RETRIES;
     fsm->state = ec_fsm_coe_dict_desc_response;
 }
@@ -905,7 +913,7 @@ void ec_fsm_coe_dict_desc_response(
     size_t rec_size, name_size;
 
     if (fsm->datagram->state == EC_DATAGRAM_TIMED_OUT && fsm->retries--) {
-        ec_slave_mbox_prepare_fetch(slave, datagram); // can not fail.
+        ec_slave_mbox_prepare_fetch(slave, datagram, EC_MBOX_USER_COE); // can not fail.
         return;
     }
 
@@ -925,9 +933,17 @@ void ec_fsm_coe_dict_desc_response(
         return;
     }
 
-    data = ec_slave_mbox_fetch(slave, fsm->datagram, &mbox_prot, &rec_size);
+    data = ec_slave_mbox_fetch(slave, fsm->datagram, EC_MBOX_USER_COE, &mbox_prot, &rec_size);
     if (IS_ERR(data)) {
         fsm->state = ec_fsm_coe_error;
+        return;
+    }
+
+    if (!data) {
+        // a mail for another protocol was put aside: check again
+        ec_slave_mbox_prepare_check(slave, datagram); // can not fail.
+        fsm->retries = EC_FSM_RETRIES;
+        fsm->state = ec_fsm_coe_dict_desc_check;
         return;
     }
 
@@ -1098,7 +1114,7 @@ void ec_fsm_coe_dict_entry_check(
         return;
     }
 
-    if (!ec_slave_mbox_check(fsm->datagram)) {
+    if (!ec_slave_mbox_check(slave, fsm->datagram, EC_MBOX_USER_COE)) {
         unsigned long diff_ms = ec_time_to_ms(
             fsm->datagram->time_received - fsm->time_start);
         if (diff_ms >= EC_FSM_COE_DICT_TIMEOUT) {
@@ -1115,7 +1131,7 @@ void ec_fsm_coe_dict_entry_check(
     }
 
     // Fetch response
-    ec_slave_mbox_prepare_fetch(slave, datagram); // can not fail.
+    ec_slave_mbox_prepare_fetch(slave, datagram, EC_MBOX_USER_COE); // can not fail.
     fsm->retries = EC_FSM_RETRIES;
     fsm->state = ec_fsm_coe_dict_entry_response;
 }
@@ -1140,7 +1156,7 @@ void ec_fsm_coe_dict_entry_response(
     uint16_t word;
 
     if (fsm->datagram->state == EC_DATAGRAM_TIMED_OUT && fsm->retries--) {
-        ec_slave_mbox_prepare_fetch(slave, datagram); // can not fail.
+        ec_slave_mbox_prepare_fetch(slave, datagram, EC_MBOX_USER_COE); // can not fail.
         return;
     }
 
@@ -1160,9 +1176,17 @@ void ec_fsm_coe_dict_entry_response(
         return;
     }
 
-    data = ec_slave_mbox_fetch(slave, fsm->datagram, &mbox_prot, &rec_size);
+    data = ec_slave_mbox_fetch(slave, fsm->datagram, EC_MBOX_USER_COE, &mbox_prot, &rec_size);
     if (IS_ERR(data)) {
         fsm->state = ec_fsm_coe_error;
+        return;
+    }
+
+    if (!data) {
+        // a mail for another protocol was put aside: check again
+        ec_slave_mbox_prepare_check(slave, datagram); // can not fail.
+        fsm->retries = EC_FSM_RETRIES;
+        fsm->state = ec_fsm_coe_dict_entry_check;
         return;
     }
 
@@ -1553,7 +1577,7 @@ void ec_fsm_coe_down_check(
         return;
     }
 
-    if (!ec_slave_mbox_check(fsm->datagram)) {
+    if (!ec_slave_mbox_check(slave, fsm->datagram, EC_MBOX_USER_COE)) {
         unsigned long diff_ms = ec_time_to_ms(
             fsm->datagram->time_received - fsm->time_start);
         if (diff_ms >= fsm->request->response_timeout) {
@@ -1571,7 +1595,7 @@ void ec_fsm_coe_down_check(
     }
 
     // Fetch response
-    ec_slave_mbox_prepare_fetch(slave, datagram); // can not fail.
+    ec_slave_mbox_prepare_fetch(slave, datagram, EC_MBOX_USER_COE); // can not fail.
     fsm->retries = EC_FSM_RETRIES;
     fsm->state = ec_fsm_coe_down_response;
 }
@@ -1657,7 +1681,7 @@ void ec_fsm_coe_down_response(
     ec_sdo_request_t *request = fsm->request;
 
     if (fsm->datagram->state == EC_DATAGRAM_TIMED_OUT && fsm->retries--) {
-        ec_slave_mbox_prepare_fetch(slave, datagram); // can not fail.
+        ec_slave_mbox_prepare_fetch(slave, datagram, EC_MBOX_USER_COE); // can not fail.
         return;
     }
 
@@ -1678,10 +1702,18 @@ void ec_fsm_coe_down_response(
         return;
     }
 
-    data = ec_slave_mbox_fetch(slave, fsm->datagram, &mbox_prot, &rec_size);
+    data = ec_slave_mbox_fetch(slave, fsm->datagram, EC_MBOX_USER_COE, &mbox_prot, &rec_size);
     if (IS_ERR(data)) {
         request->error = PTR_ERR(data);
         fsm->state = ec_fsm_coe_error;
+        return;
+    }
+
+    if (!data) {
+        // a mail for another protocol was put aside: check again
+        ec_slave_mbox_prepare_check(slave, datagram); // can not fail.
+        fsm->retries = EC_FSM_RETRIES;
+        fsm->state = ec_fsm_coe_down_check;
         return;
     }
 
@@ -1794,7 +1826,7 @@ void ec_fsm_coe_down_seg_check(
         return;
     }
 
-    if (!ec_slave_mbox_check(fsm->datagram)) {
+    if (!ec_slave_mbox_check(slave, fsm->datagram, EC_MBOX_USER_COE)) {
         unsigned long diff_ms = ec_time_to_ms(
             fsm->datagram->time_received - fsm->time_start);
         if (diff_ms >= fsm->request->response_timeout) {
@@ -1811,7 +1843,7 @@ void ec_fsm_coe_down_seg_check(
     }
 
     // Fetch response
-    ec_slave_mbox_prepare_fetch(slave, datagram); // can not fail.
+    ec_slave_mbox_prepare_fetch(slave, datagram, EC_MBOX_USER_COE); // can not fail.
     fsm->retries = EC_FSM_RETRIES;
     fsm->state = ec_fsm_coe_down_seg_response;
 }
@@ -1834,7 +1866,7 @@ void ec_fsm_coe_down_seg_response(
     ec_sdo_request_t *request = fsm->request;
 
     if (fsm->datagram->state == EC_DATAGRAM_TIMED_OUT && fsm->retries--) {
-        ec_slave_mbox_prepare_fetch(slave, datagram); // can not fail.
+        ec_slave_mbox_prepare_fetch(slave, datagram, EC_MBOX_USER_COE); // can not fail.
         return;
     }
 
@@ -1855,10 +1887,18 @@ void ec_fsm_coe_down_seg_response(
         return;
     }
 
-    data = ec_slave_mbox_fetch(slave, fsm->datagram, &mbox_prot, &rec_size);
+    data = ec_slave_mbox_fetch(slave, fsm->datagram, EC_MBOX_USER_COE, &mbox_prot, &rec_size);
     if (IS_ERR(data)) {
         request->error = PTR_ERR(data);
         fsm->state = ec_fsm_coe_error;
+        return;
+    }
+
+    if (!data) {
+        // a mail for another protocol was put aside: check again
+        ec_slave_mbox_prepare_check(slave, datagram); // can not fail.
+        fsm->retries = EC_FSM_RETRIES;
+        fsm->state = ec_fsm_coe_down_seg_check;
         return;
     }
 
@@ -2124,7 +2164,7 @@ void ec_fsm_coe_up_check(
         return;
     }
 
-    if (!ec_slave_mbox_check(fsm->datagram)) {
+    if (!ec_slave_mbox_check(slave, fsm->datagram, EC_MBOX_USER_COE)) {
         unsigned long diff_ms = ec_time_to_ms(
             fsm->datagram->time_received - fsm->time_start);
         if (diff_ms >= fsm->request->response_timeout) {
@@ -2142,7 +2182,7 @@ void ec_fsm_coe_up_check(
     }
 
     // Fetch response
-    ec_slave_mbox_prepare_fetch(slave, datagram); // can not fail.
+    ec_slave_mbox_prepare_fetch(slave, datagram, EC_MBOX_USER_COE); // can not fail.
     fsm->retries = EC_FSM_RETRIES;
     fsm->state = ec_fsm_coe_up_response;
 }
@@ -2198,7 +2238,7 @@ void ec_fsm_coe_up_response(
     int ret;
 
     if (fsm->datagram->state == EC_DATAGRAM_TIMED_OUT && fsm->retries--) {
-        ec_slave_mbox_prepare_fetch(slave, datagram); // can not fail.
+        ec_slave_mbox_prepare_fetch(slave, datagram, EC_MBOX_USER_COE); // can not fail.
         return;
     }
 
@@ -2219,10 +2259,18 @@ void ec_fsm_coe_up_response(
         return;
     }
 
-    data = ec_slave_mbox_fetch(slave, fsm->datagram, &mbox_prot, &rec_size);
+    data = ec_slave_mbox_fetch(slave, fsm->datagram, EC_MBOX_USER_COE, &mbox_prot, &rec_size);
     if (IS_ERR(data)) {
         request->error = PTR_ERR(data);
         fsm->state = ec_fsm_coe_error;
+        return;
+    }
+
+    if (!data) {
+        // a mail for another protocol was put aside: check again
+        ec_slave_mbox_prepare_check(slave, datagram); // can not fail.
+        fsm->retries = EC_FSM_RETRIES;
+        fsm->state = ec_fsm_coe_up_check;
         return;
     }
 
@@ -2451,7 +2499,7 @@ void ec_fsm_coe_up_seg_check(
         return;
     }
 
-    if (!ec_slave_mbox_check(fsm->datagram)) {
+    if (!ec_slave_mbox_check(slave, fsm->datagram, EC_MBOX_USER_COE)) {
         unsigned long diff_ms = ec_time_to_ms(
             fsm->datagram->time_received - fsm->time_start);
         if (diff_ms >= fsm->request->response_timeout) {
@@ -2468,7 +2516,7 @@ void ec_fsm_coe_up_seg_check(
     }
 
     // Fetch response
-    ec_slave_mbox_prepare_fetch(slave, datagram); // can not fail.
+    ec_slave_mbox_prepare_fetch(slave, datagram, EC_MBOX_USER_COE); // can not fail.
     fsm->retries = EC_FSM_RETRIES;
     fsm->state = ec_fsm_coe_up_seg_response;
 }
@@ -2493,7 +2541,7 @@ void ec_fsm_coe_up_seg_response(
     unsigned int last_segment;
 
     if (fsm->datagram->state == EC_DATAGRAM_TIMED_OUT && fsm->retries--) {
-        ec_slave_mbox_prepare_fetch(slave, datagram); // can not fail.
+        ec_slave_mbox_prepare_fetch(slave, datagram, EC_MBOX_USER_COE); // can not fail.
         return;
     }
 
@@ -2515,10 +2563,18 @@ void ec_fsm_coe_up_seg_response(
         return;
     }
 
-    data = ec_slave_mbox_fetch(slave, fsm->datagram, &mbox_prot, &rec_size);
+    data = ec_slave_mbox_fetch(slave, fsm->datagram, EC_MBOX_USER_COE, &mbox_prot, &rec_size);
     if (IS_ERR(data)) {
         request->error = PTR_ERR(data);
         fsm->state = ec_fsm_coe_error;
+        return;
+    }
+
+    if (!data) {
+        // a mail for another protocol was put aside: check again
+        ec_slave_mbox_prepare_check(slave, datagram); // can not fail.
+        fsm->retries = EC_FSM_RETRIES;
+        fsm->state = ec_fsm_coe_up_seg_check;
         return;
     }
 

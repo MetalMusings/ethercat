@@ -77,6 +77,9 @@ rides in `ecat`'s cyclic frames, so the servo thread never waits for it
 (no callbacks needed; `docs/design/userspace-master.md`, "EoE After
 Activation"). Expect about one mailbox (often 128 to 1024 bytes) per EoE
 slave per servo cycle in each direction, and frames that much longer.
+SDOs, firmware updates (FoE) and the like to the same slave go on
+meanwhile: the master keeps the protocols' mails in the slave's one mailbox
+apart ("One Mailbox, Several Readers" in the same document).
 
 ## From version 1.0 and lcec_uspace
 

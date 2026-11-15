@@ -337,7 +337,7 @@ void ec_voe_handler_state_read_check(ec_voe_handler_t *voe)
         return;
     }
 
-    if (!ec_slave_mbox_check(datagram)) {
+    if (!ec_slave_mbox_check(slave, datagram, EC_MBOX_USER_VOE)) {
         unsigned long diff_ms = ec_time_to_ms(
             datagram->time_received - voe->time_start);
         if (diff_ms >= EC_VOE_RESPONSE_TIMEOUT) {
@@ -353,7 +353,7 @@ void ec_voe_handler_state_read_check(ec_voe_handler_t *voe)
     }
 
     // Fetch response
-    ec_slave_mbox_prepare_fetch(slave, datagram); // can not fail.
+    ec_slave_mbox_prepare_fetch(slave, datagram, EC_MBOX_USER_VOE); // can not fail.
     voe->retries = EC_FSM_RETRIES;
     voe->state = ec_voe_handler_state_read_response;
 }
@@ -389,10 +389,18 @@ void ec_voe_handler_state_read_response(ec_voe_handler_t *voe)
         return;
     }
 
-    data = ec_slave_mbox_fetch(slave, datagram, &mbox_prot, &rec_size);
+    data = ec_slave_mbox_fetch(slave, datagram, EC_MBOX_USER_VOE, &mbox_prot, &rec_size);
     if (IS_ERR(data)) {
         voe->state = ec_voe_handler_state_error;
         voe->request_state = EC_INT_REQUEST_FAILURE;
+        return;
+    }
+
+    if (!data) {
+        // a mail for another protocol was put aside: check again
+        ec_slave_mbox_prepare_check(slave, datagram); // can not fail.
+        voe->retries = EC_FSM_RETRIES;
+        voe->state = ec_voe_handler_state_read_check;
         return;
     }
 
@@ -441,7 +449,9 @@ void ec_voe_handler_state_read_nosync_start(ec_voe_handler_t *voe)
         return;
     }
 
-    ec_slave_mbox_prepare_fetch(slave, datagram); // can not fail.
+    // Without a mailbox check first: always the mailbox itself. (Another
+    // reader fetching at the same moment may then find it empty.)
+    ec_slave_mbox_prepare_fetch(slave, datagram, EC_MBOX_USER_ANY); // can not fail.
 
     voe->time_start = ec_current_time();
     voe->retries = EC_FSM_RETRIES;
@@ -487,8 +497,10 @@ void ec_voe_handler_state_read_nosync_response(ec_voe_handler_t *voe)
         return;
     }
 
-    if (!(data = ec_slave_mbox_fetch(slave, datagram,
-                    &mbox_prot, &rec_size))) {
+    // NULL: the mail belonged to another protocol and was put aside
+    data = ec_slave_mbox_fetch(slave, datagram, EC_MBOX_USER_VOE,
+            &mbox_prot, &rec_size);
+    if (!data || IS_ERR(data)) {
         voe->state = ec_voe_handler_state_error;
         voe->request_state = EC_INT_REQUEST_FAILURE;
         return;

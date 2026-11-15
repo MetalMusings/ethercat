@@ -35,6 +35,7 @@ AM_CPPFLAGS = \
 
 check_PROGRAMS = \
 	test_datagram \
+	test_mbox_share \
 	test_dict_gate \
 	test_emerg_ring \
 	test_ipc_socket \
@@ -50,6 +51,7 @@ check_PROGRAMS = \
 	test_sim_domain \
 	test_sim_eoe \
 	test_sim_eoe_cyclic \
+	test_sim_mbox_share \
 	test_sim_irq_pin \
 	test_sim_link \
 	test_sim_multi \
@@ -75,6 +77,7 @@ LDADD = $(top_builddir)/master/uspace/libethercat.la
 AM_LDFLAGS = -static
 
 test_datagram_SOURCES = test_datagram.c test.h
+test_mbox_share_SOURCES = test_mbox_share.c test.h
 test_ipc_socket_SOURCES = test_ipc_socket.c test.h
 test_dict_gate_SOURCES = test_dict_gate.c test.h
 test_emerg_ring_SOURCES = test_emerg_ring.c test.h
@@ -94,6 +97,7 @@ test_sim_dict_bg_SOURCES = test_sim_dict_bg.c test.h
 test_sim_domain_SOURCES = test_sim_domain.c test.h
 test_sim_eoe_SOURCES = test_sim_eoe.c test.h
 test_sim_eoe_cyclic_SOURCES = test_sim_eoe_cyclic.c test.h
+test_sim_mbox_share_SOURCES = test_sim_mbox_share.c test.h
 test_sim_irq_pin_SOURCES = test_sim_irq_pin.c test.h
 test_sim_link_SOURCES = test_sim_link.c test.h
 test_sim_multi_SOURCES = test_sim_multi.c test.h

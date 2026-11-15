@@ -552,6 +552,62 @@ Fixed on the way: the EoE sender cut frames into fragments by the slave's
 *send* mailbox size while writing them into its *receive* mailbox; slaves
 with mailboxes of different sizes got "Send error" for every larger frame.
 
+### One Mailbox, Several Readers
+
+A slave has one mailbox for all its protocols, and one mail in it at a time.
+The master reads it from several places: the CoE, FoE, SoE and EoE state
+machines in the master's thread, the EoE handler in the EoE thread (it polls
+all the time, because the TAP device counts as open from its creation), and
+VoE handlers in the application's thread. Each of them used to read whatever
+was there and to give up on a mail of another protocol: the EoE handler
+dropped CoE responses ("Other mailbox protocol response"), so that SDOs to
+an EoE slave timed out and a slave with SDOs in its configuration never
+reached OP; the CoE state machine failed on an Ethernet frame ("Received
+mailbox protocol 0x02 as response").
+
+Now a reader that fetches a mail of another reader puts it aside for it
+(`master/mailbox.c`, `ec_mbox_stash_t`, one per slave with a mailbox):
+
+- **Readers** (`ec_mbox_user_t`): CoE, FoE, SoE, VoE, EoE frames (the
+  handler: frame type 0) and EoE parameters (the EoE state machine:
+  everything else). Each has one place for one mail. The bus scan's drain
+  of stale mails reads the mailbox as it is (`EC_MBOX_USER_ANY`).
+- **Check** (`ec_slave_mbox_check()`): 1 if a mail is put aside for the
+  reader, or if the mailbox is full and no other reader is fetching it.
+  Only one reader at a time is told to fetch (an atomic token); the others
+  get 0 and check again, as with an empty mailbox. A "full" seen by a check
+  datagram that was sent before the last fetch came back is that same mail
+  and counts as empty. A token is given up after 500 ms (an error path that
+  never came back); two readers may then fetch at once, as before.
+- **Fetch** (`ec_slave_mbox_prepare_fetch()`): the mailbox, if the reader
+  holds the token; else the mail is put aside and the datagram reads the
+  mailbox status register instead (one more cycle, and the callers' checks
+  of the datagram stay as they are).
+- **Result** (`ec_slave_mbox_fetch()`): the reader's mail, or NULL when
+  the mail belonged to another reader and was put aside: the caller checks
+  the mailbox again, as its state machines already did after a CoE
+  emergency message. Mailbox error mails (type 0) go to whoever fetched.
+- A request (`ec_slave_mbox_prepare_send()`, and the EoE parameter request)
+  first forgets a mail put aside for its reader: it would be taken as the
+  answer. A CoE emergency message stays.
+
+The places are lock-free (EMPTY/WRITING/FULL/READING by compare-and-swap),
+since the readers run in three threads, one of them realtime; nothing waits
+and nothing is allocated after the bus scan. One place per reader: a second
+mail for a reader that has not taken the first replaces it (two CoE mails
+fetched by the EoE handler in a row, for example an emergency message and
+then a response; the state machines poll every cycle, so the first is
+normally taken in between). `ecrt_voe_handler_read_nosync()` reads the
+mailbox without a check and so without the token; a reader fetching at the
+same moment can find the mailbox empty.
+
+Tested by `tests/test_mbox_share.c` (the rules one by one, without a bus)
+and `tests/test_sim_mbox_share.c`: a slave with EoE and ten SDOs in
+its configuration reaches OP, and 50 SDO uploads succeed while Ethernet
+frames are echoed through the same mailbox. For that the simulated slave
+got what a slave's mailbox stack has: responses wait in a queue behind the
+send mailbox instead of being dropped, and an empty mailbox does not answer.
+
 ### Transport Ops Visibility (`ectp.h`)
 
 `ec_transport_ops_t` is intentionally visible in the public `ectp.h` header so
