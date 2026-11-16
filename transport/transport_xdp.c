@@ -50,6 +50,17 @@
 #include "ectp.h"
 #include "irq_pin.h"
 
+/* bpf_prog_get_info_by_fd() and bpf_map_get_info_by_fd() came with libbpf
+ * 1.4; before that (Debian 12 has 1.1) bpf_obj_get_info_by_fd() does both. */
+#include <bpf/libbpf_version.h>
+#if LIBBPF_MAJOR_VERSION > 1 || (LIBBPF_MAJOR_VERSION == 1 && LIBBPF_MINOR_VERSION >= 4)
+#define EC_BPF_INFO_BY_FD(fd, info, len) \
+    _Generic(*(info), struct bpf_prog_info: bpf_prog_get_info_by_fd, \
+             struct bpf_map_info: bpf_map_get_info_by_fd)(fd, info, len)
+#else
+#define EC_BPF_INFO_BY_FD(fd, info, len) bpf_obj_get_info_by_fd(fd, info, len)
+#endif
+
 /****************************************************************************/
 
 /*
@@ -263,12 +274,12 @@ static int xdp_is_ours(uint32_t prog_id, int *map_fd_out)
     memset(&info, 0, sizeof(info));
     info.nr_map_ids = 1;
     info.map_ids = (uint64_t)(unsigned long)&map_id;
-    if (bpf_prog_get_info_by_fd(prog_fd, &info, &len) == 0
+    if (EC_BPF_INFO_BY_FD(prog_fd, &info, &len) == 0
             && strcmp(info.name, EC_XDP_PROG_NAME) == 0
             && info.nr_map_ids == 1) {
         map_fd = bpf_map_get_fd_by_id(map_id);
         memset(&map_info, 0, sizeof(map_info));
-        if (map_fd >= 0 && bpf_map_get_info_by_fd(map_fd, &map_info,
+        if (map_fd >= 0 && EC_BPF_INFO_BY_FD(map_fd, &map_info,
                     &map_len) == 0
                 && map_info.type == BPF_MAP_TYPE_XSKMAP) {
             (void)fcntl(map_fd, F_SETFD, FD_CLOEXEC);
