@@ -33,6 +33,16 @@
 #include "datagram.h"
 #include "master.h"
 
+/* The kernel build keeps plain fields (EC_PAL_SHARED is empty there) and
+ * reads a slave's mailbox under its own locking, so the handover between
+ * readers needs no atomics. */
+#ifndef EC_USPACE_MASTER
+#define atomic_load(p) (*(p))
+#define atomic_store(p, v) ((void) (*(p) = (v)))
+#define atomic_compare_exchange_strong(p, e, v) \
+    (*(p) == *(e) ? (*(p) = (v), 1) : (*(e) = *(p), 0))
+#endif
+
 /****************************************************************************/
 
 /**
