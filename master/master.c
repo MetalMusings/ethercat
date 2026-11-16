@@ -2741,6 +2741,18 @@ int ecrt_master_select_reference_clock(ec_master_t *master,
     }
 
     master->dc_ref_config = sc;
+
+    /* The reference clock is found after a bus scan (ec_master_calc_dc()).
+     * An application selects it once its slave configurations exist, which
+     * is mostly after the scan: find it, and the transmission delays from
+     * it, again now, or the selection would count only from the next scan
+     * (and the first DC-capable slave would stay the clock, and be
+     * requested to OP, configured or not). Activation writes the system
+     * time offsets and delays again (config_changed). During a scan, the
+     * scan's end does it. */
+    if (master->slave_count && !master->scan_busy && !master->active) {
+        ec_master_calc_dc(master);
+    }
     return 0;
 }
 
