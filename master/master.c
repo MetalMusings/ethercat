@@ -3037,6 +3037,10 @@ int ecrt_master_sdo_download(ec_master_t *master, uint16_t slave_position,
         return -EINVAL;
     }
 
+    if (slave->config && slave->config->sdo_timeout_ms) {
+        request.response_timeout = slave->config->sdo_timeout_ms;
+    }
+
     EC_SLAVE_DBG(slave, 1, "Scheduling SDO download request.\n");
 
     // schedule request.
@@ -3117,6 +3121,10 @@ int ecrt_master_sdo_download_complete(ec_master_t *master,
         return -EINVAL;
     }
 
+    if (slave->config && slave->config->sdo_timeout_ms) {
+        request.response_timeout = slave->config->sdo_timeout_ms;
+    }
+
     EC_SLAVE_DBG(slave, 1, "Scheduling SDO download request"
             " (complete access).\n");
 
@@ -3188,6 +3196,10 @@ int ecrt_master_sdo_upload(ec_master_t *master, uint16_t slave_position,
         ec_sdo_request_clear(&request);
         EC_MASTER_ERR(master, "Slave %u does not exist!\n", slave_position);
         return -EINVAL;
+    }
+
+    if (slave->config && slave->config->sdo_timeout_ms) {
+        request.response_timeout = slave->config->sdo_timeout_ms;
     }
 
     EC_SLAVE_DBG(slave, 1, "Scheduling SDO upload request.\n");

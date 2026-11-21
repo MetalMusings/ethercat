@@ -35,7 +35,6 @@
 
 /** Default timeout in ms to wait for SDO transfer responses.
  */
-#define EC_SDO_REQUEST_RESPONSE_TIMEOUT 1000
 
 /****************************************************************************/
 

@@ -79,6 +79,9 @@
  * - Added ecrt_slave_config_state_timeout() to set the application-layer
  *   state change timeout and EC_HAVE_STATE_TIMEOUT to check for its
  *   existence.
+ * - Added ecrt_slave_config_sdo_timeout() to set a slave's SDO response
+ *   timeout (an ESI file's Mailbox/Timeout/ResponseTimeout) and
+ *   EC_HAVE_SDO_TIMEOUT to check for its existence.
  *
  * Changes since version 1.5.2:
  *
@@ -281,6 +284,10 @@
 /** Defined, if the method ecrt_slave_config_state_timeout() is available.
  */
 #define EC_HAVE_STATE_TIMEOUT
+
+/** Defined, if the method ecrt_slave_config_sdo_timeout() is available.
+ */
+#define EC_HAVE_SDO_TIMEOUT
 
 /** Defined, if ec_slave_config_state_t has the dc_sync_failed bit.
  */
@@ -2410,6 +2417,27 @@ EC_PUBLIC_API int ecrt_slave_config_state_timeout(
         ec_al_state_t from_state, /**< Initial state. */
         ec_al_state_t to_state, /**< Target state. */
         unsigned int timeout_ms /**< Timeout in [ms]. */
+        );
+
+/** Sets the response timeout of a slave's SDO transfers.
+ *
+ * The time the master waits for the slave's answer to an SDO request
+ * (default 1000 ms, as EC_SDO_REQUEST_RESPONSE_TIMEOUT) for the slave's
+ * configured SDOs (ecrt_slave_config_sdo() and the like, also those
+ * configured before), its SDO requests (ecrt_slave_config_create_sdo_request())
+ * and the blocking ecrt_master_sdo_download()/upload() to its position. An
+ * ESI file gives it as Mailbox/Timeout/ResponseTimeout.
+ *
+ * A timeout of zero ms restores the default.
+ *
+ * \apiusage{master_idle,blocking}
+ *
+ * \retval  0 Success.
+ * \retval <0 Error code.
+ */
+EC_PUBLIC_API int ecrt_slave_config_sdo_timeout(
+        ec_slave_config_t *sc, /**< Slave configuration. */
+        uint32_t timeout_ms /**< Timeout in [ms]. */
         );
 
 /*****************************************************************************

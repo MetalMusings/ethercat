@@ -142,6 +142,8 @@ struct ec_slave_config {
     struct list_head soe_configs; /**< List of SoE configurations. */
     struct list_head flags; /**< List of feature flags. */
     struct list_head al_timeouts; /**< List of specific AL state timeouts. */
+    uint32_t sdo_timeout_ms; /**< Response timeout of this slave's SDO
+                               transfers [ms], 0 for the default. */
 
 #ifdef EC_EOE
     ec_eoe_request_t eoe_ip_param_request; /**< EoE IP parameters. */

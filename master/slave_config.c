@@ -87,6 +87,7 @@ void ec_slave_config_init(
     sc->product_code = product_code;
     sc->watchdog_divider = 0; // use default
     sc->watchdog_intervals = 0; // use default
+    sc->sdo_timeout_ms = 0; // use default
 
     sc->slave = NULL;
 
@@ -1070,6 +1071,9 @@ int ecrt_slave_config_sdo(ec_slave_config_t *sc, uint16_t index,
     }
 
     ec_sem_down(&sc->master->master_sem);
+    if (sc->sdo_timeout_ms) {
+        req->response_timeout = sc->sdo_timeout_ms;
+    }
     list_add_tail(&req->list, &sc->sdo_configs);
     ec_sem_up(&sc->master->master_sem);
     return 0;
@@ -1155,6 +1159,9 @@ int ecrt_slave_config_complete_sdo(ec_slave_config_t *sc, uint16_t index,
     }
 
     ec_sem_down(&sc->master->master_sem);
+    if (sc->sdo_timeout_ms) {
+        req->response_timeout = sc->sdo_timeout_ms;
+    }
     list_add_tail(&req->list, &sc->sdo_configs);
     ec_sem_up(&sc->master->master_sem);
     return 0;
@@ -1222,6 +1229,9 @@ ec_sdo_request_t *ecrt_slave_config_create_sdo_request_err(
     // prepare data for optional writing
     memset(req->data, 0x00, size);
     req->data_size = size;
+    if (sc->sdo_timeout_ms) {
+        req->response_timeout = sc->sdo_timeout_ms;
+    }
 
     ec_sem_down(&sc->master->master_sem);
     list_add_tail(&req->list, &sc->sdo_requests);
@@ -1627,6 +1637,31 @@ int ecrt_slave_config_state_timeout(ec_slave_config_t *sc,
 
     ec_sem_down(&sc->master->master_sem);
     list_add_tail(&timeout->list, &sc->al_timeouts);
+    ec_sem_up(&sc->master->master_sem);
+    return 0;
+}
+
+/****************************************************************************/
+
+int ecrt_slave_config_sdo_timeout(ec_slave_config_t *sc,
+        uint32_t timeout_ms)
+{
+    ec_sdo_request_t *req;
+
+    EC_CONFIG_DBG(sc, 1, "%s(sc = 0x%p, timeout_ms = %u)\n",
+            __func__, sc, timeout_ms);
+
+    ec_sem_down(&sc->master->master_sem);
+    sc->sdo_timeout_ms = timeout_ms;
+    /* what is configured already takes it too; 0 puts back the default */
+    list_for_each_entry(req, &sc->sdo_configs, list) {
+        req->response_timeout = timeout_ms ? timeout_ms
+            : EC_SDO_REQUEST_RESPONSE_TIMEOUT;
+    }
+    list_for_each_entry(req, &sc->sdo_requests, list) {
+        req->response_timeout = timeout_ms ? timeout_ms
+            : EC_SDO_REQUEST_RESPONSE_TIMEOUT;
+    }
     ec_sem_up(&sc->master->master_sem);
     return 0;
 }

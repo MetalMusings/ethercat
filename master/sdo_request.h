@@ -36,6 +36,10 @@
 
 /****************************************************************************/
 
+/** The default time a slave has to answer an SDO request [ms]; a slave
+ * configuration may give its own (ecrt_slave_config_sdo_timeout()). */
+#define EC_SDO_REQUEST_RESPONSE_TIMEOUT 1000
+
 /** CANopen SDO request.
  */
 struct ec_sdo_request {
