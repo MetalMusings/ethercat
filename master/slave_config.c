@@ -1129,12 +1129,27 @@ int ecrt_slave_config_sdo32(ec_slave_config_t *sc, uint16_t index,
 int ecrt_slave_config_complete_sdo(ec_slave_config_t *sc, uint16_t index,
         const uint8_t *data, size_t size)
 {
+    return ecrt_slave_config_complete_sdo_from(sc, index, 0, data, size);
+}
+
+/****************************************************************************/
+
+int ecrt_slave_config_complete_sdo_from(ec_slave_config_t *sc,
+        uint16_t index, uint8_t subindex, const uint8_t *data, size_t size)
+{
     ec_slave_t *slave = sc->slave;
     ec_sdo_request_t *req;
     int ret;
 
-    EC_CONFIG_DBG(sc, 1, "%s(sc = 0x%p, index = 0x%04X, "
-            "data = 0x%p, size = %zu)\n", __func__, sc, index, data, size);
+    EC_CONFIG_DBG(sc, 1, "%s(sc = 0x%p, index = 0x%04X, subindex = %u, "
+            "data = 0x%p, size = %zu)\n", __func__, sc, index, subindex,
+            data, size);
+
+    if (subindex > 1) {
+        EC_CONFIG_ERR(sc, "Complete access starts at subindex 0 or 1,"
+                " not %u.\n", subindex);
+        return -EINVAL;
+    }
 
     if (slave && !(slave->sii.mailbox_protocols & EC_MBOX_COE)) {
         EC_CONFIG_WARN(sc, "Attached slave does not support CoE!\n");
@@ -1148,7 +1163,7 @@ int ecrt_slave_config_complete_sdo(ec_slave_config_t *sc, uint16_t index,
     }
 
     ec_sdo_request_init(req);
-    ecrt_sdo_request_index(req, index, 0);
+    ecrt_sdo_request_index(req, index, subindex);
     req->complete_access = 1;
 
     ret = ec_sdo_request_copy_data(req, data, size);

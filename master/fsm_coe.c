@@ -1417,7 +1417,7 @@ int ec_fsm_coe_prepare_down_start(
                     | 0x1 << 5)); // Download request
         EC_WRITE_U16(data + 3, request->index);
         EC_WRITE_U8 (data + 5,
-                request->complete_access ? 0x00 : request->subindex);
+                request->subindex); // complete access: 0 or 1 (from 1: subindex 0 left out)
         memcpy(data + 6, request->data, request->data_size);
         memset(data + 6 + request->data_size, 0x00, 4 - request->data_size);
 
@@ -1457,7 +1457,7 @@ int ec_fsm_coe_prepare_down_start(
                 | 0x1 << 5); // Download request
         EC_WRITE_U16(data + 3, request->index);
         EC_WRITE_U8 (data + 5,
-                request->complete_access ? 0x00 : request->subindex);
+                request->subindex); // complete access: 0 or 1 (from 1: subindex 0 left out)
         EC_WRITE_U32(data + 6, request->data_size);
 
         if (data_size > EC_COE_DOWN_REQ_HEADER_SIZE) {

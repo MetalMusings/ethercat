@@ -82,6 +82,8 @@
  * - Added ecrt_slave_config_sdo_timeout() to set a slave's SDO response
  *   timeout (an ESI file's Mailbox/Timeout/ResponseTimeout) and
  *   EC_HAVE_SDO_TIMEOUT to check for its existence.
+ * - Added ecrt_slave_config_complete_sdo_from() for complete access from
+ *   subindex 1 (an ESI InitCmd's) and EC_HAVE_COMPLETE_SDO_FROM.
  *
  * Changes since version 1.5.2:
  *
@@ -288,6 +290,11 @@
 /** Defined, if the method ecrt_slave_config_sdo_timeout() is available.
  */
 #define EC_HAVE_SDO_TIMEOUT
+
+/** Defined, if the method ecrt_slave_config_complete_sdo_from() is
+ * available.
+ */
+#define EC_HAVE_COMPLETE_SDO_FROM
 
 /** Defined, if ec_slave_config_state_t has the dc_sync_failed bit.
  */
@@ -1976,6 +1983,26 @@ EC_PUBLIC_API int ecrt_slave_config_sdo32(
 EC_PUBLIC_API int ecrt_slave_config_complete_sdo(
         ec_slave_config_t *sc, /**< Slave configuration. */
         uint16_t index, /**< Index of the SDO to configure. */
+        const uint8_t *data, /**< Pointer to the data. */
+        size_t size /**< Size of the \a data. */
+        );
+
+/** Add a configuration value for an SDO with complete access, starting at
+ * subindex 0 or 1.
+ *
+ * As ecrt_slave_config_complete_sdo() (which starts at subindex 0), but from
+ * \a subindex 1 the data leaves out subindex 0: the way an ESI file's InitCmd
+ * with CompleteAccess and SubIndex 1 gives it.
+ *
+ * \apiusage{master_idle,blocking}
+ *
+ * \retval  0 Success.
+ * \retval <0 Error code (-EINVAL for a subindex other than 0 or 1).
+ */
+EC_PUBLIC_API int ecrt_slave_config_complete_sdo_from(
+        ec_slave_config_t *sc, /**< Slave configuration. */
+        uint16_t index, /**< Index of the SDO to configure. */
+        uint8_t subindex, /**< 0 or 1: the first subindex in \a data. */
         const uint8_t *data, /**< Pointer to the data. */
         size_t size /**< Size of the \a data. */
         );

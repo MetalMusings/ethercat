@@ -598,7 +598,8 @@ static void sim_coe_request(sim_slave_t *slave, const uint8_t *coe,
     cs = coe[2];
     ccs = cs >> 5;
     index = sim_rd16(coe + 3);
-    subindex = (cs & 0x10) ? 0 : coe[5]; /* complete access: subindex 0 */
+    /* complete access: kept as one entry at the subindex it starts at (0 or 1) */
+    subindex = (cs & 0x10) ? (coe[5] ? 1 : 0) : coe[5];
 
     switch (ccs) {
         case 0x1: /* initiate download */
