@@ -2848,6 +2848,110 @@ out_get_slave:
 
 /****************************************************************************/
 
+#ifdef EC_USPACE_MASTER
+
+/* The slave's sync managers, PDOs and entries as the master knows them (read
+ * at the scan, or the ones it configured): what an application in the same
+ * process needs to compare a slave's own mapping with its configuration. In
+ * the kernel build these come through the ioctl library (lib/master.c). */
+
+int ecrt_master_get_sync_manager(ec_master_t *master, uint16_t slave_position,
+        uint8_t sync_index, ec_sync_info_t *sync)
+{
+    const ec_slave_t *slave;
+    const ec_sync_t *s;
+    int ret = 0;
+
+    if (sync_index >= EC_MAX_SYNC_MANAGERS) {
+        return -ENOENT;
+    }
+    if (ec_sem_down_interruptible(&master->master_sem)) {
+        return -EINTR;
+    }
+    slave = ec_master_find_slave_const(master, 0, slave_position);
+    if (slave == NULL || sync_index >= slave->sii.sync_count) {
+        ret = -ENOENT;
+    } else {
+        s = &slave->sii.syncs[sync_index];
+        sync->index = sync_index;
+        sync->dir = ec_sync_default_direction(s);
+        sync->n_pdos = ec_pdo_list_count(&s->pdos);
+        sync->pdos = NULL;
+        sync->watchdog_mode = EC_WD_DEFAULT;
+    }
+    ec_sem_up(&master->master_sem);
+    return ret;
+}
+
+/****************************************************************************/
+
+int ecrt_master_get_pdo(ec_master_t *master, uint16_t slave_position,
+        uint8_t sync_index, uint16_t pos, ec_pdo_info_t *pdo)
+{
+    const ec_slave_t *slave;
+    const ec_pdo_t *p;
+    int ret = 0;
+
+    if (sync_index >= EC_MAX_SYNC_MANAGERS) {
+        return -ENOENT;
+    }
+    if (ec_sem_down_interruptible(&master->master_sem)) {
+        return -EINTR;
+    }
+    slave = ec_master_find_slave_const(master, 0, slave_position);
+    p = slave != NULL && sync_index < slave->sii.sync_count
+        ? ec_pdo_list_find_pdo_by_pos_const(&slave->sii.syncs[sync_index].pdos, pos)
+        : NULL;
+    if (p == NULL) {
+        ret = -ENOENT;
+    } else {
+        pdo->index = p->index;
+        pdo->n_entries = ec_pdo_entry_count(p);
+        pdo->entries = NULL;
+    }
+    ec_sem_up(&master->master_sem);
+    return ret;
+}
+
+/****************************************************************************/
+
+int ecrt_master_get_pdo_entry(ec_master_t *master, uint16_t slave_position,
+        uint8_t sync_index, uint16_t pdo_pos, uint16_t entry_pos,
+        ec_pdo_entry_info_t *entry)
+{
+    const ec_slave_t *slave;
+    const ec_pdo_t *p;
+    const ec_pdo_entry_t *e = NULL;
+    int ret = 0;
+
+    if (sync_index >= EC_MAX_SYNC_MANAGERS) {
+        return -ENOENT;
+    }
+    if (ec_sem_down_interruptible(&master->master_sem)) {
+        return -EINTR;
+    }
+    slave = ec_master_find_slave_const(master, 0, slave_position);
+    p = slave != NULL && sync_index < slave->sii.sync_count
+        ? ec_pdo_list_find_pdo_by_pos_const(&slave->sii.syncs[sync_index].pdos, pdo_pos)
+        : NULL;
+    if (p != NULL) {
+        e = ec_pdo_find_entry_by_pos_const(p, entry_pos);
+    }
+    if (e == NULL) {
+        ret = -ENOENT;
+    } else {
+        entry->index = e->index;
+        entry->subindex = e->subindex;
+        entry->bit_length = e->bit_length;
+    }
+    ec_sem_up(&master->master_sem);
+    return ret;
+}
+
+#endif
+
+/****************************************************************************/
+
 void ecrt_master_callbacks(ec_master_t *master,
         void (*send_cb)(void *), void (*receive_cb)(void *), void *cb_data)
 {
