@@ -25,7 +25,7 @@ set -euo pipefail
 
 PKG=linuxcnc-ethercat-uspace
 PREFIX=/opt/$PKG
-BASE_VERSION=1.6
+BASE_VERSION=1.7
 
 OUTDIR=$PWD
 while getopts "o:h" opt; do
