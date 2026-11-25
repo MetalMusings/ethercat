@@ -35,6 +35,7 @@ ecrt_master_get_pdo;
 ecrt_master_get_pdo_entry;
 ecrt_master_get_slave;
 ecrt_master_get_sync_manager;
+ecrt_master_frame_stats;
 ecrt_master_link_state;
 ecrt_master_read_idn;
 ecrt_master_receive;

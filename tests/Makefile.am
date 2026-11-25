@@ -45,6 +45,7 @@ check_PROGRAMS = \
 	test_shared \
 	test_sim_coe \
 	test_sim_sdo_timeout \
+	test_sim_frame_stats \
 	test_sim_complete_sdo \
 	test_sim_dc \
 	test_sim_dc_sync_failed \
@@ -96,6 +97,7 @@ test_rt_pagefault_SOURCES = test_rt_pagefault.c test.h
 test_shared_SOURCES = test_shared.c test.h
 test_sim_coe_SOURCES = test_sim_coe.c test.h
 test_sim_sdo_timeout_SOURCES = test_sim_sdo_timeout.c test.h
+test_sim_frame_stats_SOURCES = test_sim_frame_stats.c test.h
 test_sim_complete_sdo_SOURCES = test_sim_complete_sdo.c test.h
 test_sim_dc_SOURCES = test_sim_dc.c test.h
 test_sim_dc_sync_failed_SOURCES = test_sim_dc_sync_failed.c test.h

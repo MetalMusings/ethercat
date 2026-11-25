@@ -128,6 +128,7 @@ struct sim_bus {
     unsigned int scans;       /**< Bus scans begun: broadcast writes of the
                                 station address register (0x0010). */
     int drop_frame;           /**< The frame being processed is lost. */
+    unsigned int lose_frames; /**< Replies still to lose (sim_bus_lose_frames). */
     long irq_pin_frames;      /**< frame_count at that call, -1 if never. */
     pthread_mutex_t lock;
 
@@ -1393,6 +1394,10 @@ static int sim_send(ec_transport_t *transport, size_t size)
 
     bus->frame_count++;
     bus->drop_frame = 0;
+    if (bus->lose_frames) {
+        bus->lose_frames--;
+        bus->drop_frame = 1;
+    }
 
     if (sim_bus_process_frame(bus, transport->tx_buffer, size) == 0
             && !bus->drop_frame) {
@@ -1678,6 +1683,13 @@ void sim_bus_lose_sii(sim_bus_t *bus, unsigned int pos, unsigned int scans)
     if (pos < bus->nslaves) {
         bus->slaves[pos].sii_lost_scans = scans;
     }
+    pthread_mutex_unlock(&bus->lock);
+}
+
+void sim_bus_lose_frames(sim_bus_t *bus, unsigned int frames)
+{
+    pthread_mutex_lock(&bus->lock);
+    bus->lose_frames = frames;
     pthread_mutex_unlock(&bus->lock);
 }
 

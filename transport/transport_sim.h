@@ -100,6 +100,10 @@ unsigned long sim_bus_frame_count(sim_bus_t *bus);
  * master starts. */
 void sim_bus_lose_sii(sim_bus_t *bus, unsigned int pos, unsigned int scans);
 
+/** Lose the replies to the next \a frames frames: the slaves process them,
+ * but they never come back to the master (a frame lost on the wire). */
+void sim_bus_lose_frames(sim_bus_t *bus, unsigned int frames);
+
 /** Deliver every reply \a us microseconds after its frame was sent (0: at
  * once), as a NIC whose interrupts are handled on a busy CPU does. */
 void sim_bus_set_reply_delay(sim_bus_t *bus, unsigned int us);

@@ -128,6 +128,11 @@ typedef struct {
     unsigned int unmatched; /**< unmatched datagrams (received, but not
                                queued any longer) */
     ec_time_t output_time; /**< time of last output */
+    /* The same since the master started, never reset: the counts above
+     * are cleared each time they are logged (ecrt_master_frame_stats()). */
+    EC_PAL_SHARED uint64_t timeouts_total;
+    EC_PAL_SHARED uint64_t corrupted_total;
+    EC_PAL_SHARED uint64_t unmatched_total;
 } ec_stats_t;
 
 /****************************************************************************/

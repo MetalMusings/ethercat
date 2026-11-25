@@ -220,6 +220,9 @@ int ec_master_init(ec_master_t *master, /**< EtherCAT master */
     master->stats.corrupted = 0;
     master->stats.unmatched = 0;
     master->stats.output_time = 0;
+    master->stats.timeouts_total = 0;
+    master->stats.corrupted_total = 0;
+    master->stats.unmatched_total = 0;
 
     master->thread = NULL;
 
@@ -1154,6 +1157,7 @@ void ec_master_receive_datagrams(
             ec_print_data(frame_data, size);
         }
         master->stats.corrupted++;
+        master->stats.corrupted_total++;
 #ifdef EC_RT_SYSLOG
         ec_master_output_stats(master);
 #endif
@@ -1175,6 +1179,7 @@ void ec_master_receive_datagrams(
             ec_print_data(frame_data, size);
         }
         master->stats.corrupted++;
+        master->stats.corrupted_total++;
 #ifdef EC_RT_SYSLOG
         ec_master_output_stats(master);
 #endif
@@ -1199,6 +1204,7 @@ void ec_master_receive_datagrams(
                 ec_print_data(frame_data, size);
             }
             master->stats.corrupted++;
+            master->stats.corrupted_total++;
 #ifdef EC_RT_SYSLOG
             ec_master_output_stats(master);
 #endif
@@ -1220,6 +1226,7 @@ void ec_master_receive_datagrams(
         // no matching datagram was found
         if (!matched) {
             master->stats.unmatched++;
+            master->stats.unmatched_total++;
 #ifdef EC_RT_SYSLOG
             ec_master_output_stats(master);
 #endif
@@ -2576,6 +2583,7 @@ int ecrt_master_receive(ec_master_t *master)
             list_del_init(&datagram->queue);
             datagram->state = EC_DATAGRAM_TIMED_OUT;
             master->stats.timeouts++;
+            master->stats.timeouts_total++;
 
 #ifdef EC_RT_SYSLOG
             ec_master_output_stats(master);
@@ -2849,6 +2857,35 @@ out_get_slave:
 /****************************************************************************/
 
 #ifdef EC_USPACE_MASTER
+
+int ecrt_master_frame_stats(const ec_master_t *master,
+        ec_master_frame_stats_t *stats)
+{
+    ec_master_frame_stats_t s;
+    unsigned int i;
+    size_t n;
+
+    if (!master || !stats || stats->size < offsetof(ec_master_frame_stats_t, tx_frames)) {
+        return -EINVAL;
+    }
+    memset(&s, 0, sizeof(s));
+    s.size = sizeof(s);
+    s.tx_frames = master->device_stats.tx_count;
+    s.rx_frames = master->device_stats.rx_count;
+    for (i = 0; i < ec_master_num_devices(master); i++) {
+        s.tx_errors += master->devices[i].tx_errors;
+    }
+    s.timeouts = master->stats.timeouts_total;
+    s.corrupted = master->stats.corrupted_total;
+    s.unmatched = master->stats.unmatched_total;
+    /* fill only what the caller's structure has room for */
+    n = stats->size < sizeof(s) ? stats->size : sizeof(s);
+    s.size = n;
+    memcpy(stats, &s, n);
+    return 0;
+}
+
+/****************************************************************************/
 
 /* The slave's sync managers, PDOs and entries as the master knows them (read
  * at the scan, or the ones it configured): what an application in the same
